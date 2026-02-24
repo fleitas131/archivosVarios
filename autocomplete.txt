@@ -1,0 +1,213 @@
+import { Component, OnInit, Input, Output, EventEmitter, ViewChild, forwardRef, AfterViewInit, viewChild} from '@angular/core';
+import { FormGroup, FormControl, ControlValueAccessor } from '@angular/forms';
+import { tap, Observable, of } from 'rxjs';
+import { startWith } from 'rxjs/internal/operators/startWith';
+import { debounceTime, distinctUntilChanged, map, switchMap } from 'rxjs/operators';
+import { ChangeDetectorRef } from '@angular/core';
+import { MatAutocompleteTrigger } from '@angular/material/autocomplete';
+
+export interface Country {
+  id: number;
+  description: string;
+}
+
+@Component({
+  selector: 'app-autocomplete-input',
+  templateUrl: './autocomplete-input.component.html',
+  styleUrl: './autocomplete-input.component.scss',
+})
+export class AutocompleteInputComponent  implements OnInit, ControlValueAccessor{
+
+  @Input() dataSource?: () => Observable<any[]>;
+  @Input() paginatedSource?: (
+    description: string,
+    page:number,
+    pageSize: number,
+    countryId?: number,
+  ) => Observable<any[]>;
+  @Input() pageSize = 10;
+
+  @Input() displayField: string;
+  @Input() formGroup: FormGroup;
+  @Input() label: string = '';
+  @Input() controlName: string;
+  //@Input() control: FormControl;
+
+
+  @Output() itemChange: EventEmitter<Country> = new EventEmitter();
+
+  @ViewChild(MatAutocompleteTrigger)
+  autocompleteTrigger: MatAutocompleteTrigger;
+
+  //myControl = new FormControl<string | Country>('');
+  //countries: Country[] = [];
+
+  control = new FormControl<any>('');
+  options: any[] = [];
+  filteredOptions: Observable<any[]>;
+  private onChange = (value: any) => {};
+  private onTouched = () => {};
+
+  page = 0;
+  hasMore = true;
+  loading = false;
+  currentSearch = '';
+
+  constructor(private cd: ChangeDetectorRef) {}
+
+  ngOnInit(): void {
+
+    //si no es paginado
+    if (this.dataSource) {
+      this.dataSource().subscribe(data => {
+        this.options = data;
+
+        this.filteredOptions = this.control.valueChanges.pipe(
+          startWith(''),
+          map(value => {
+            const filterValue =
+            typeof value === 'string' 
+            ? value 
+            : value?.[this.displayField];
+            return this._filter(filterValue || '');
+          })
+        );
+      });
+    }
+
+    //si es paginado
+    if (this.paginatedSource) {
+      this.filteredOptions = this.control.valueChanges.pipe(
+        //startWith(''),
+        debounceTime(300),
+        map(value =>
+          typeof value === 'string'
+            ? value
+            : value?.[this.displayField] ?? ''
+        ),
+        distinctUntilChanged(),
+        switchMap(value => {
+          if (!value || value.trim().length === 0) {
+            this.resetPagination();
+            return of([]);
+          }
+
+          this.currentSearch = value;
+          this.resetPagination();
+          return this.loadPage();
+        }
+      ));
+    }
+
+    this.control.valueChanges.subscribe(value => {
+
+      if (!value /*|| value.description.trim().length === 0*/) {
+        this.resetPagination();
+      }
+
+      /*if (typeof value === 'object') {
+        this.onChange(value);
+      } else {
+        this.onChange(null);
+      }*/
+    })
+  }
+
+  onOpened() {
+    setTimeout(() => {
+      const panel = document.querySelector('.mat-mdc-autocomplete-panel');
+      if (!panel) return;
+      panel.addEventListener('scroll', this.onScroll);
+    });
+  }
+
+  onScroll = (event: any) => {
+    const panel = event.target;
+    const atBottom = panel.scrollHeight - panel.scrollTop <= panel.clientHeight + 10;
+    if (atBottom && this.hasMore && !this.loading) {
+      this.loadMore();
+    }
+  };
+
+  displayFn = (item: any): string => {
+    return item ? item[this.displayField] : '';
+  };
+
+  private _filter(value: string): any[] {
+    const filterValue = value.toLowerCase();
+    return this.options.filter(option => option[this.displayField].toLowerCase().includes(filterValue))
+  }
+
+  private loadPage(): Observable<any[]> {
+    if (!this.paginatedSource /*|| this.loading || !this.hasMore*/) {
+      return of(this.options);
+    }
+    
+    this.loading = true;
+
+    return this.paginatedSource(
+      this.currentSearch,
+      this.page,
+      this.pageSize
+    ).pipe(
+      tap(result => {
+        if (result.length < this.pageSize) {
+          this.hasMore = false;
+        }
+
+        this.options = [...this.options, ...result];
+        this.page++;
+        this.loading = false;
+
+        console.log(this.options);
+
+        this.cd.detectChanges();
+        this.autocompleteTrigger.updatePosition();
+      }),
+      map(() => this.options)
+    );
+  }
+
+  loadMore() {
+    //this.loadPage().subscribe(updated => {
+    //  this.filteredOptions = of(updated);
+    //});
+    if (this.loading || !this.hasMore) return;
+    this.loadPage().subscribe();
+    //this.filteredOptions = this.loadPage();
+  }
+
+  private resetPagination() {
+    this.page = 0;
+    this.options = [];
+    this.hasMore = true;
+  }
+
+  writeValue(value: any): void {
+    this.control.setValue(value);
+  }
+
+  registerOnChange(fn: any): void {
+    this.onChange = fn;
+  }
+
+  registerOnTouched(fn: any): void {
+    this.onTouched = fn;
+  }
+
+  setDisabledState(isDisabled: boolean): void {
+    isDisabled ? this.control.disable() : this.control.enable();
+  }
+
+  selectedOptionChanged(item: Country, haltEvent?: boolean) {
+      if (!item) return;   
+
+      this.onChange(item);
+      this.onTouched();
+
+      if (!haltEvent) {
+        this.itemChange.emit(item);
+      }
+    }
+
+}
