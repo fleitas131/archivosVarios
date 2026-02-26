@@ -16,7 +16,7 @@ export interface Country {
   templateUrl: './autocomplete-input.component.html',
   styleUrl: './autocomplete-input.component.scss',
 })
-export class AutocompleteInputComponent  implements OnInit, ControlValueAccessor{
+export class AutocompleteInputComponent  implements OnInit {
 
   @Input() dataSource?: () => Observable<any[]>;
   @Input() paginatedSource?: (
@@ -31,18 +31,13 @@ export class AutocompleteInputComponent  implements OnInit, ControlValueAccessor
   @Input() formGroup: FormGroup;
   @Input() label: string = '';
   @Input() controlName: string;
-  //@Input() control: FormControl;
 
 
   @Output() itemChange: EventEmitter<Country> = new EventEmitter();
 
   @ViewChild(MatAutocompleteTrigger)
   autocompleteTrigger: MatAutocompleteTrigger;
-
-  //myControl = new FormControl<string | Country>('');
-  //countries: Country[] = [];
-
-  control = new FormControl<any>('');
+  
   options: any[] = [];
   filteredOptions: Observable<any[]>;
   private onChange = (value: any) => {};
@@ -52,16 +47,27 @@ export class AutocompleteInputComponent  implements OnInit, ControlValueAccessor
   hasMore = true;
   loading = false;
   currentSearch = '';
+  typedValue: string = '';
 
   constructor(private cd: ChangeDetectorRef) {}
 
+  get control(): FormControl {
+    return this.formGroup.get(this.controlName) as FormControl;
+  }
+
   ngOnInit(): void {
+    const parentControl = this.formGroup.get(this.controlName);
+    if (parentControl) {
+      this.control.setValue(parentControl.value);
+      parentControl.valueChanges.subscribe(value => {
+        this.control.setValue(value, { emitEvent: false });
+      });
+    }
 
     //si no es paginado
     if (this.dataSource) {
       this.dataSource().subscribe(data => {
         this.options = data;
-
         this.filteredOptions = this.control.valueChanges.pipe(
           startWith(''),
           map(value => {
@@ -78,10 +84,8 @@ export class AutocompleteInputComponent  implements OnInit, ControlValueAccessor
     //si es paginado
     if (this.paginatedSource) {
       this.filteredOptions = this.control.valueChanges.pipe(
-        //startWith(''),
         debounceTime(300),
-        map(value =>
-          typeof value === 'string'
+        map(value => typeof value === 'string'
             ? value
             : value?.[this.displayField] ?? ''
         ),
@@ -100,16 +104,9 @@ export class AutocompleteInputComponent  implements OnInit, ControlValueAccessor
     }
 
     this.control.valueChanges.subscribe(value => {
-
-      if (!value /*|| value.description.trim().length === 0*/) {
+      if (!value) {
         this.resetPagination();
       }
-
-      /*if (typeof value === 'object') {
-        this.onChange(value);
-      } else {
-        this.onChange(null);
-      }*/
     })
   }
 
@@ -130,7 +127,11 @@ export class AutocompleteInputComponent  implements OnInit, ControlValueAccessor
   };
 
   displayFn = (item: any): string => {
-    return item ? item[this.displayField] : '';
+    //return item ? item[this.displayField] : '';
+
+    if (!item) return '';
+    if (typeof item === 'string') return item;
+    return item[this.displayField];
   };
 
   private _filter(value: string): any[] {
@@ -139,7 +140,7 @@ export class AutocompleteInputComponent  implements OnInit, ControlValueAccessor
   }
 
   private loadPage(): Observable<any[]> {
-    if (!this.paginatedSource /*|| this.loading || !this.hasMore*/) {
+    if (!this.paginatedSource) {
       return of(this.options);
     }
     
@@ -169,12 +170,8 @@ export class AutocompleteInputComponent  implements OnInit, ControlValueAccessor
   }
 
   loadMore() {
-    //this.loadPage().subscribe(updated => {
-    //  this.filteredOptions = of(updated);
-    //});
     if (this.loading || !this.hasMore) return;
     this.loadPage().subscribe();
-    //this.filteredOptions = this.loadPage();
   }
 
   private resetPagination() {
@@ -183,31 +180,12 @@ export class AutocompleteInputComponent  implements OnInit, ControlValueAccessor
     this.hasMore = true;
   }
 
-  writeValue(value: any): void {
-    this.control.setValue(value);
+  selectedOptionChanged(item: any) {
+    if (!item) return;
+
+    this.control.setValue(item.id);
+    this.autocompleteTrigger.writeValue(item[this.displayField]);
+    this.itemChange.emit(item);
   }
-
-  registerOnChange(fn: any): void {
-    this.onChange = fn;
-  }
-
-  registerOnTouched(fn: any): void {
-    this.onTouched = fn;
-  }
-
-  setDisabledState(isDisabled: boolean): void {
-    isDisabled ? this.control.disable() : this.control.enable();
-  }
-
-  selectedOptionChanged(item: Country, haltEvent?: boolean) {
-      if (!item) return;   
-
-      this.onChange(item);
-      this.onTouched();
-
-      if (!haltEvent) {
-        this.itemChange.emit(item);
-      }
-    }
 
 }
