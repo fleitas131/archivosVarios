@@ -74,7 +74,7 @@ export class AutocompleteInputComponent  implements OnInit {
             const filterValue =
             typeof value === 'string' 
             ? value 
-            : value?.[this.displayField];
+            : this.resolveDisplay(value)/*value?.[this.displayField]*/
             return this._filter(filterValue || '');
           })
         );
@@ -108,6 +108,13 @@ export class AutocompleteInputComponent  implements OnInit {
         this.resetPagination();
       }
     })
+
+    setTimeout(() => {
+      const currentValue = this.control.value;
+      if (currentValue) {
+        this.control.setValue(currentValue);
+      }
+    })
   }
 
   onOpened() {
@@ -126,12 +133,20 @@ export class AutocompleteInputComponent  implements OnInit {
     }
   };
 
+  private resolveDisplay(item: any): string {
+    if (!item) return '';
+    if (typeof item === 'string') return item;
+    if (typeof item === 'number') {
+      const found = this.options.find(opt => opt.id === item);
+      return found ? found[this.displayField] : '';
+    }
+    return item[this.displayField];
+  }
+
   displayFn = (item: any): string => {
     //return item ? item[this.displayField] : '';
 
-    if (!item) return '';
-    if (typeof item === 'string') return item;
-    return item[this.displayField];
+    return this.resolveDisplay(item);
   };
 
   private _filter(value: string): any[] {
@@ -184,7 +199,7 @@ export class AutocompleteInputComponent  implements OnInit {
     if (!item) return;
 
     this.control.setValue(item.id);
-    this.autocompleteTrigger.writeValue(item[this.displayField]);
+    //this.autocompleteTrigger.writeValue(item[this.displayField]);
     this.itemChange.emit(item);
   }
 
