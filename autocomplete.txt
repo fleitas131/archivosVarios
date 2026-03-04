@@ -2,6 +2,46 @@
   [formGroup]="formGroup"
   class="pwc-forms__field pwc-forms__field--text form-group"
 >
+  <ng-container *ngIf="!formGroup.get(controlName).disabled || !detailMode">
+    <label>{{ label }}</label>
+    <input
+      matInput
+      class="form-control"
+      [style.width]="inputWidth"
+      [formControlName]="controlName"
+      [matTooltip]="tooltip"
+      matTooltipHideDelay="1000000000"
+      [placeholder]="placeholder"
+      [type]="inputType"
+      #textInput
+    />
+    <!--<mat-hint *ngIf="tooltip"> {{ tooltip }} </mat-hint>-->
+
+    <ng-container *ngIf="formGroup.get(controlName).valid && enableHint">
+      <div class="input-text-hint">
+        <mat-hint>{{ textInput.value.length }} / {{ maxLength }}</mat-hint>
+      </div>
+    </ng-container>
+
+    <ng-container *ngIf="hasError('required')">
+      <div style="margin-top: 10px">
+        <mat-error> {{ "ERRORS.INPUT-MANDATORY" | translate }} </mat-error>
+      </div>
+    </ng-container>
+  </ng-container>
+
+  <ng-container *ngIf="hasError('email')">
+    <div style="margin-top: 10px">
+      <mat-error> {{ "ERRORS.EMAIL-INPUT" | translate }} </mat-error>
+    </div>
+  </ng-container>
+</div>
+
+//////////
+<div
+  [formGroup]="formGroup"
+  class="pwc-forms__field pwc-forms__field--text form-group"
+>
   <ng-container *ngIf="!formGroup.get(controlName).disabled">
     <label>{{ label }}</label>
 
@@ -1508,5 +1548,6 @@ export class EmsEntityEditorComponent implements OnInit, AfterViewInit {
     console.log(this.ticketForm.get(['generalInformation', 'prid']));
   }
 }
+
 
 
