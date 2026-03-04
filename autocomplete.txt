@@ -1,3 +1,74 @@
+<div
+  [formGroup]="formGroup"
+  class="pwc-forms__field pwc-forms__field--text form-group"
+>
+
+    <ng-container>
+        <label>{{ label }}</label>
+        <mat-form-field class="example-full-width"> 
+            <div class="test-input" id="test-test">
+                
+                <input 
+                    type="text"
+                    matInput
+                    [formControl]="control"
+                    [matAutocomplete]="auto"
+                    id="input-autocomplete"
+                />
+
+                <mat-autocomplete 
+                    #auto="matAutocomplete"
+                    [displayWith]="displayFn"
+                    (opened)="onOpened()"
+                    (optionSelected)="selectedOptionChanged($event.option.value)">
+
+                    <mat-option
+                        *ngFor="let option of filteredOptions | async" 
+                        [value]="option">
+
+                        {{ option[displayField] }}
+
+                    </mat-option>
+
+                    <mat-option *ngIf="loading" disabled>
+                        Loading...
+                    </mat-option>
+
+                    <!--<mat-option 
+                        *ngIf="hasMore"
+                        class="load-more-option">
+                            <div
+                                (click)="loadMore(); $event.stopPropagation()"
+                                style="width: 100%; cursor: pointer;">
+                                    <strong>More...</strong>
+
+                            </div>
+                    </mat-option>-->
+                </mat-autocomplete>
+
+            </div>
+
+            <ng-container
+            *ngIf="
+                (control.touched || formGroup.get(controlName).touched) &&
+                !formGroup.get(controlName).value">
+                <div
+                    *ngIf="formGroup.get(controlName).hasError('required')"
+                    style="margin-top: 10px">
+                    <mat-error> {{ "ERRORS.INPUT-MANDATORY" | translate }} </mat-error>
+                </div>
+            </ng-container>
+            
+        </mat-form-field>
+
+    </ng-container>
+
+    
+
+</div>
+
+//////////////
+
 import { Component, OnInit, Input, Output, EventEmitter, ViewChild, forwardRef, AfterViewInit, viewChild} from '@angular/core';
 import { FormGroup, FormControl, ControlValueAccessor } from '@angular/forms';
 import { tap, Observable, of } from 'rxjs';
@@ -1357,3 +1428,4 @@ export class EmsEntityEditorComponent implements OnInit, AfterViewInit {
     console.log(this.ticketForm.get(['generalInformation', 'prid']));
   }
 }
+
