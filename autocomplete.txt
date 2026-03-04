@@ -2,6 +2,86 @@
   [formGroup]="formGroup"
   class="pwc-forms__field pwc-forms__field--text form-group"
 >
+  <ng-container *ngIf="!formGroup.get(controlName).disabled">
+    <label>{{ label }}</label>
+
+    <div>
+      <input
+        #inputField
+        matInput
+        type="text"
+        class="form-control"
+        [formControl]="autoCompleteControl"
+        [matAutocomplete]="auto"
+        [placeholder]="placeholder"
+      />
+
+      <mat-autocomplete
+        autoActiveFirstOption
+        [displayWith]="displayItem"
+        #auto="matAutocomplete"
+        style="width: 100%"
+      >
+        <mat-option
+          *ngFor="let item of searchedItems$ | async"
+          [value]="item"
+          (onSelectionChange)="selectedOptionChanged(item)"
+        >
+          {{ item.description }}
+        </mat-option>
+      </mat-autocomplete>
+    </div>
+
+    <!-- errors -->
+    <ng-container
+      *ngIf="
+        (autoCompleteControl.touched || formGroup.get(controlName).touched) &&
+        !formGroup.get(controlName).value
+      "
+    >
+      <div
+        *ngIf="formGroup.get(controlName).hasError('required')"
+        style="margin-top: 10px"
+      >
+        <mat-error> {{ "ERRORS.INPUT-MANDATORY" | translate }} </mat-error>
+      </div>
+    </ng-container>
+
+    <ng-container
+      *ngIf="
+        autoCompleteControl.touched &&
+        autoCompleteControl.dirty &&
+        !!autoCompleteControl.value
+      "
+    >
+      <mat-error
+        *ngIf="
+          !(searchedItems$ | async)?.length &&
+          formGroup.get(controlName).invalid
+        "
+        style="margin-top: 10px"
+      >
+        {{ "ERRORS.SUGGEST_NO_MATCH" | translate }}
+      </mat-error>
+    </ng-container>
+  </ng-container>
+
+  <ng-container *ngIf="formGroup.get(controlName).disabled">
+    <label>{{ label }}</label>
+    <input
+      matInput
+      type="text"
+      class="form-control"
+      [value]="autoCompleteControl.getRawValue()?.description"
+      [disabled]="true"
+    />
+  </ng-container>
+</div>
+/////////
+<div
+  [formGroup]="formGroup"
+  class="pwc-forms__field pwc-forms__field--text form-group"
+>
 
     <ng-container>
         <label>{{ label }}</label>
@@ -1428,4 +1508,5 @@ export class EmsEntityEditorComponent implements OnInit, AfterViewInit {
     console.log(this.ticketForm.get(['generalInformation', 'prid']));
   }
 }
+
 
