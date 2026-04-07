@@ -187,10 +187,11 @@
 
 </div>
 
-//////////////
+///////////////////
+AUTOCOMPLETE
 
 import { Component, OnInit, Input, Output, EventEmitter, ViewChild, forwardRef, AfterViewInit, viewChild} from '@angular/core';
-import { FormGroup, FormControl, ControlValueAccessor } from '@angular/forms';
+import { FormGroup, FormControl, ControlValueAccessor, Validators } from '@angular/forms';
 import { tap, Observable, of } from 'rxjs';
 import { startWith } from 'rxjs/internal/operators/startWith';
 import { debounceTime, distinctUntilChanged, map, switchMap } from 'rxjs/operators';
@@ -203,9 +204,10 @@ export interface Country {
 }
 
 @Component({
-  selector: 'app-autocomplete-input',
-  templateUrl: './autocomplete-input.component.html',
-  styleUrl: './autocomplete-input.component.scss',
+    selector: 'app-autocomplete-input',
+    templateUrl: './autocomplete-input.component.html',
+    styleUrl: './autocomplete-input.component.scss',
+    standalone: false
 })
 export class AutocompleteInputComponent  implements OnInit {
 
@@ -394,7 +396,12 @@ export class AutocompleteInputComponent  implements OnInit {
     this.itemChange.emit(item);
   }
 
+  get isRequired(): boolean {
+    return this.control.hasValidator(Validators.required) ?? false;
+  }
+
 }
+
 ///////////////////
 import { AfterViewInit, ChangeDetectorRef, Component, OnInit, ViewChild } from '@angular/core';
 import { LoadingService } from 'src/app/services/system/loading.service';
