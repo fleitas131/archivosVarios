@@ -402,6 +402,22 @@ export class AutocompleteInputComponent  implements OnInit {
 
 }
 
+loadIdentifiers = (description: string, page: number, pageSize: number) => {
+    return this.identifierTypeSuggestService.getSuggestPaginated(description, page, pageSize);
+  }
+
+<app-autocomplete-input
+        [formGroup]="subformGroup"
+        [controlName]="control.key"
+        [dataSource]="loadIdentifiers"
+        displayField="description"
+        [label]="getFormControlLabel(subformGroupName, control.key) | translate"
+        *ngIf="control.key == 'identifierTypeId'">
+ </app-autocomplete-input>
+
+Type '(description: string, page: number, pageSize: number) => Observable<Item[]>' is not assignable to type '() => Observable<any[]>'.
+  Target signature provides too few arguments. Expected 3 or more, but got 0
+
 ///////////////////
 import { AfterViewInit, ChangeDetectorRef, Component, OnInit, ViewChild } from '@angular/core';
 import { LoadingService } from 'src/app/services/system/loading.service';
