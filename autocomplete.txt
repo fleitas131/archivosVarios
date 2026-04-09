@@ -225,6 +225,7 @@ export class AutocompleteInputComponent  implements OnInit {
   @Input() label: string = '';
   @Input() controlName: string;
 
+  @Input() loadOnFocus: boolean = false;
 
   @Output() itemChange: EventEmitter<Country> = new EventEmitter();
 
@@ -258,7 +259,7 @@ export class AutocompleteInputComponent  implements OnInit {
     }
 
     //si no es paginado
-    if (this.dataSource) {
+    if (this.dataSource && !this.loadOnFocus) {
       this.dataSource().subscribe(data => {
         this.options = data;
         this.filteredOptions = this.control.valueChanges.pipe(
@@ -308,6 +309,28 @@ export class AutocompleteInputComponent  implements OnInit {
         this.control.setValue(currentValue);
       }
     })
+  }
+
+  onFocus() {
+    if (this.dataSource && this.loadOnFocus) {
+      this.dataSource().subscribe(data => {
+        this.options = data;
+        console.log(data);
+        //this.control.setValue(this.control.value || '');
+        this.filteredOptions = this.control.valueChanges.pipe(
+          startWith(''),
+          map(value => {
+            const filterValue =
+            typeof value === 'string' 
+            ? value 
+            : this.resolveDisplay(value)/*value?.[this.displayField]*/
+            return this._filter(filterValue || '');
+          })
+        );
+      });
+    } 
+    
+    this.autocompleteTrigger.openPanel();
   }
 
   onOpened() {
@@ -401,30 +424,6 @@ export class AutocompleteInputComponent  implements OnInit {
   }
 
 }
-
-// On registered address country change
-    this.ticketForm
-      .get(['registeredAddress', 'countryId'])
-      .valueChanges
-      .subscribe((countryId) => {
-        this.registeredStateSuggestService.countryId = countryId;
-        this.ticketForm.get(['registeredAddress', 'stateId']).reset();
-        setTimeout(() => {
-          this.ticketForm.get(['registeredAddress', 'stateId']).markAsTouched();  
-        }, 500);
-      });
-    
-    // On operating address country change
-    this.ticketForm
-      .get(['operatingAddress', 'countryId'])
-      .valueChanges
-      .subscribe((countryId) => {
-        this.operatingStateSuggestService.countryId = countryId;
-        this.ticketForm.get(['operatingAddress', 'stateId']).reset();
-        setTimeout(() => {
-          this.ticketForm.get(['operatingAddress', 'stateId']).markAsTouched();
-        }, 500);
-      });
 
 ///////////////////
 import { AfterViewInit, ChangeDetectorRef, Component, OnInit, ViewChild } from '@angular/core';
