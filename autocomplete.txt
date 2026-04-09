@@ -425,18 +425,90 @@ export class AutocompleteInputComponent  implements OnInit {
 
 }
 
+----
 
-loadRegisteredCountries = () => {
-    return this.registeredCountrySuggestService.getSuggestByDescription('');
-  }
+<div
+  [formGroup]="formGroup"
+  class="pwc-forms__field pwc-forms__field--text form-group"
+>
 
-loadRegisteredStates = () => {
-    const selectedCountry = this.ticketForm.get(['registeredAddress','countryId']).value;
-    if (!selectedCountry) return of ([]);
-    const countryId = typeof selectedCountry === 'object' ? selectedCountry?.id : selectedCountry;
+    <ng-container>
+        <label>{{ label }}</label>
+        <mat-form-field 
+            class="example-full-width"
+            [class.required-empty]="isRequired && !control.value"> 
 
-    return this.registeredStateSuggestService.getSuggestPaginated('', 0, 1000, countryId);
-  }
+                <span class="mandatory-overlay"
+                    id="overlay-field"
+                    *ngIf="isRequired && !control.value">
+                    {{ "ERRORS.INPUT-MANDATORY" | translate }}
+                </span>
+
+                <div class="input-region" id="test-test">
+
+                    
+                        
+                    <input
+                        #inputElement
+                        class="form-control" 
+                        type="text"
+                        matInput
+                        [formControl]="control"
+                        [matAutocomplete]="auto"
+                        (focus)="onFocus()"
+                        id="input-autocomplete"
+                    />
+
+                    <mat-autocomplete 
+                        #auto="matAutocomplete"
+                        [displayWith]="displayFn"
+                        (opened)="onOpened()"
+                        (optionSelected)="selectedOptionChanged($event.option.value)">
+
+                        <mat-option
+                            *ngFor="let option of filteredOptions | async" 
+                            [value]="option">
+
+                            {{ option[displayField] }}
+
+                        </mat-option>
+
+                        <mat-option *ngIf="loading" disabled>
+                            Loading...
+                        </mat-option>
+
+                        <!--<mat-option 
+                            *ngIf="hasMore"
+                            class="load-more-option">
+                                <div
+                                    (click)="loadMore(); $event.stopPropagation()"
+                                    style="width: 100%; cursor: pointer;">
+                                        <strong>More...</strong>
+
+                                </div>
+                        </mat-option>-->
+                    </mat-autocomplete>
+
+                </div>
+
+                <!--<ng-container
+                *ngIf="
+                    (control.touched || formGroup.get(controlName).touched) &&
+                    !formGroup.get(controlName).value">
+                    <div
+                        *ngIf="formGroup.get(controlName).hasError('required')"
+                        style="margin-top: 10px">
+                        <mat-error> {{ "ERRORS.INPUT-MANDATORY" | translate }} </mat-error>
+                    </div>
+                </ng-container>-->
+            
+        </mat-form-field>
+
+    </ng-container>
+
+    
+
+</div>
 ///////////////////
 import { AfterViewInit, ChangeDetectorRef, Component, OnInit, ViewChild } from '@angular/core';
 import { LoadingService } from 'src/app/services/system/loading.service';
