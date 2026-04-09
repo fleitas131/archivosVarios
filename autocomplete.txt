@@ -425,6 +425,18 @@ export class AutocompleteInputComponent  implements OnInit {
 
 }
 
+
+loadRegisteredCountries = () => {
+    return this.registeredCountrySuggestService.getSuggestByDescription('');
+  }
+
+loadRegisteredStates = () => {
+    const selectedCountry = this.ticketForm.get(['registeredAddress','countryId']).value;
+    if (!selectedCountry) return of ([]);
+    const countryId = typeof selectedCountry === 'object' ? selectedCountry?.id : selectedCountry;
+
+    return this.registeredStateSuggestService.getSuggestPaginated('', 0, 1000, countryId);
+  }
 ///////////////////
 import { AfterViewInit, ChangeDetectorRef, Component, OnInit, ViewChild } from '@angular/core';
 import { LoadingService } from 'src/app/services/system/loading.service';
