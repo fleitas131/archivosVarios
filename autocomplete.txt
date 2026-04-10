@@ -521,6 +521,25 @@ loadRegisteredStates = () => {
     return this.registeredStateSuggestService.getSuggestByDescription(selectedCountry.description);
   }
 
+---
+
+getSuggestByDescription(description: string): Observable<Item[]> {
+    if (!this._countryId) {
+      return of([]);
+    }
+
+    let params = new HttpParams()
+      .append('countryId', this._countryId)
+      .append('description', description);
+
+    return this.httpClient.get<Item[]>(`${this.apiEndpoint}/Province/Provinces`, { params })
+      .pipe(
+        map(response => {
+          return response;
+        }),
+      );
+  }
+
 ///////////////////
 import { AfterViewInit, ChangeDetectorRef, Component, OnInit, ViewChild } from '@angular/core';
 import { LoadingService } from 'src/app/services/system/loading.service';
