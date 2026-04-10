@@ -554,6 +554,37 @@ getSuggestByDescription(description: string): Observable<Item[]> {
       })
     }
 
+----
+
+async submit() {
+    let ticket = this.getTicketFromForm();
+
+    this.ticketForm.updateValueAndValidity({ emitEvent: false });
+    if (this.ticketForm.invalid) {
+      this.toastrService.error(this.translate.instant('TOASTR.ENTITY-ERROR'))
+      return;
+    }
+    
+    const confirm = await lastValueFrom(
+      this.dialogService.openConfirmDialog(this.translate.instant('TOASTR.CONFIRMATION-MESSAGE'), '').afterClosed()
+    );
+    if (!confirm) return;
+
+
+
+    /*this.loadingService.setSpinner(true);
+    const result = await lastValueFrom(
+      this.ticketService.submit(ticket)
+    );
+
+    this.router.navigate(['/', AppRoute.OVERVIEW]);    
+    this.ticketId = result.header.ticketId;
+    this.status = result.header.status;*/
+
+    //this.ticketForm.get('header').patchValue(result.header, { emitEvent: false });
+    
+  }
+
 ///////////////////
 import { AfterViewInit, ChangeDetectorRef, Component, OnInit, ViewChild } from '@angular/core';
 import { LoadingService } from 'src/app/services/system/loading.service';
