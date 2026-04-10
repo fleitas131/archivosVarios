@@ -540,6 +540,20 @@ getSuggestByDescription(description: string): Observable<Item[]> {
       );
   }
 
+---
+
+//identifier
+    const identifierId = this.ticketForm.get(['generalInformation','identifierTypeId']).value;
+    if (identifierId) {
+      this.identifierTypeSuggestService.getSuggestPaginated(identifierId.toString(), 0, 1)
+      .subscribe(items => {
+        const found = items.find(x =>x.id === identifierId);
+        if (found) {
+          this.ticketForm.get(['generalInformation','identifierTypeId']).setValue(found.description, { emitEvent: false });
+        }
+      })
+    }
+
 ///////////////////
 import { AfterViewInit, ChangeDetectorRef, Component, OnInit, ViewChild } from '@angular/core';
 import { LoadingService } from 'src/app/services/system/loading.service';
