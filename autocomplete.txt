@@ -190,7 +190,7 @@
 ///////////////////
 AUTOCOMPLETE
 
-import { Component, OnInit, Input, Output, EventEmitter, ViewChild, forwardRef, AfterViewInit, viewChild} from '@angular/core';
+import { Component, OnInit, Input, Output, EventEmitter, ViewChild, ElementRef} from '@angular/core';
 import { FormGroup, FormControl, ControlValueAccessor, Validators } from '@angular/forms';
 import { tap, Observable, of } from 'rxjs';
 import { startWith } from 'rxjs/internal/operators/startWith';
@@ -231,6 +231,8 @@ export class AutocompleteInputComponent  implements OnInit {
 
   @ViewChild(MatAutocompleteTrigger)
   autocompleteTrigger: MatAutocompleteTrigger;
+
+  @ViewChild('inputElement') inputElement: ElementRef;
   
   options: any[] = [];
   filteredOptions: Observable<any[]>;
@@ -317,16 +319,7 @@ export class AutocompleteInputComponent  implements OnInit {
         this.options = data;
         console.log(data);
         //this.control.setValue(this.control.value || '');
-        this.filteredOptions = this.control.valueChanges.pipe(
-          startWith(''),
-          map(value => {
-            const filterValue =
-            typeof value === 'string' 
-            ? value 
-            : this.resolveDisplay(value)/*value?.[this.displayField]*/
-            return this._filter(filterValue || '');
-          })
-        );
+        
       });
     } 
     
@@ -366,6 +359,10 @@ export class AutocompleteInputComponent  implements OnInit {
   };
 
   private _filter(value: string): any[] {
+    if (!value) {
+      return this.options;
+    }
+
     const filterValue = value.toLowerCase();
     return this.options.filter(option => option[this.displayField].toLowerCase().includes(filterValue))
   }
@@ -393,8 +390,11 @@ export class AutocompleteInputComponent  implements OnInit {
 
         console.log(this.options);
 
+        //this.filteredOptions = of(this.options);
+
         this.cd.detectChanges();
         this.autocompleteTrigger.updatePosition();
+
       }),
       map(() => this.options)
     );
@@ -414,6 +414,8 @@ export class AutocompleteInputComponent  implements OnInit {
   selectedOptionChanged(item: any) {
     if (!item) return;
 
+    //const fullItem = this.options.find(opt => opt.id === item.id) || item;
+
     this.control.setValue(item);
     //this.autocompleteTrigger.writeValue(item[this.displayField]);
     this.itemChange.emit(item);
@@ -424,7 +426,6 @@ export class AutocompleteInputComponent  implements OnInit {
   }
 
 }
-
 ----
 
 <div
@@ -509,6 +510,17 @@ export class AutocompleteInputComponent  implements OnInit {
     
 
 </div>
+
+---
+
+loadRegisteredStates = () => {
+    const selectedCountry = this.ticketForm.get(['registeredAddress','countryId']).value;
+    if (!selectedCountry) return of ([]);
+    const country = selectedCountry.id;
+
+    return this.registeredStateSuggestService.getSuggestByDescription(selectedCountry.description);
+  }
+
 ///////////////////
 import { AfterViewInit, ChangeDetectorRef, Component, OnInit, ViewChild } from '@angular/core';
 import { LoadingService } from 'src/app/services/system/loading.service';
