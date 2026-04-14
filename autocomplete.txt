@@ -1,5 +1,4 @@
 AUTOCOMPLETE
-
 import { Component, OnInit, Input, Output, EventEmitter, ViewChild, ElementRef} from '@angular/core';
 import { FormGroup, FormControl, ControlValueAccessor, Validators } from '@angular/forms';
 import { tap, Observable, of } from 'rxjs';
@@ -255,9 +254,10 @@ export class AutocompleteInputComponent  implements OnInit {
 
 }
 
-//////
 
-EDITOR  
+/////
+
+EDITOR
 
 import { AfterViewInit, ChangeDetectorRef, Component, OnInit, ViewChild } from '@angular/core';
 import { LoadingService } from 'src/app/services/system/loading.service';
@@ -661,12 +661,7 @@ export class EmsEntityEditorComponent implements OnInit, AfterViewInit {
     const assigneeEmail = this.ticketForm.get(['header', 'assignee']).value;
     const emsUserEmail = this.authService.currentUser.email;
 
-    if (this.createMode || this.updateMode)
-    {
-      return check;
-    }
-
-    if (assigneeEmail == null || assigneeEmail != emsUserEmail) {
+    if (assigneeEmail != null && assigneeEmail == emsUserEmail && this.status == this.TicketStatus.PENDING) {
       check = true;
     }
 
@@ -1423,51 +1418,61 @@ export class EmsEntityEditorComponent implements OnInit, AfterViewInit {
   private restoreAutocompleteFields(entiy: IEntity): void {
     //registered country
     //const registeredCountryId = this.ticketForm.get(['registeredAddress', 'countryId']).value;
-    const registeredCountryId = entiy.registeredAddress.countryId;
-    if (registeredCountryId) {
-      this.registeredCountrySuggestService.getSuggestPaginated(registeredCountryId.toString(), 0, 1)
-      .subscribe(items => {
-        const found = items.find(x =>x.id === registeredCountryId);
-        if (found) {
-          this.ticketForm.get(['registeredAddress', 'countryId']).setValue(found, { emitEvent: false });
-        }
-      })
+   if (
+        entiy.registeredAddress &&
+        Object.values(entiy.registeredAddress).some(v => v !== null && v !== undefined && v !== '')
+      ) {
+      const registeredCountryId = entiy.registeredAddress.countryId;
+      if (registeredCountryId) {
+        this.registeredCountrySuggestService.getSuggestPaginated(registeredCountryId.toString(), 0, 1)
+        .subscribe(items => {
+          const found = items.find(x =>x.id === registeredCountryId);
+          if (found) {
+            this.ticketForm.get(['registeredAddress', 'countryId']).setValue(found, { emitEvent: false });
+          }
+        })
+      }
+
+      //registered state
+      const registeredStateId = this.ticketForm.get(['registeredAddress', 'stateId']).value;
+      if (registeredStateId) {
+        this.registeredStateSuggestService.getSuggestPaginated(registeredStateId.toString(), 0, 1, registeredCountryId)
+        .subscribe(items => {
+          const found = items.find(x =>x.id === registeredStateId);
+          if (found) {
+            this.ticketForm.get(['registeredAddress', 'stateId']).setValue(found, { emitEvent: false });
+          }
+        })
+      }
     }
 
-    //registered state
-    const registeredStateId = this.ticketForm.get(['registeredAddress', 'stateId']).value;
-    if (registeredStateId) {
-      this.registeredStateSuggestService.getSuggestPaginated(registeredStateId.toString(), 0, 1, registeredCountryId)
-      .subscribe(items => {
-        const found = items.find(x =>x.id === registeredStateId);
-        if (found) {
-          this.ticketForm.get(['registeredAddress', 'stateId']).setValue(found, { emitEvent: false });
-        }
-      })
-    }
+  if (
+        entiy.operatingAddress &&
+        Object.values(entiy.operatingAddress).some(v => v !== null && v !== undefined && v !== '')
+      ) {
+      //operating country
+      const operatingCountryId = this.ticketForm.get(['operatingAddress', 'countryId']).value;
+      if (operatingCountryId) {
+        this.operatingCountrySuggestService.getSuggestPaginated(operatingCountryId.toString(), 0, 1)
+        .subscribe(items => {
+          const found = items.find(x =>x.id === operatingCountryId);
+          if (found) {
+            this.ticketForm.get(['operatingAddress', 'countryId']).setValue(found, { emitEvent: false });
+          }
+        })
+      }
 
-    //operating country
-    const operatingCountryId = this.ticketForm.get(['operatingAddress', 'countryId']).value;
-    if (operatingCountryId) {
-      this.operatingCountrySuggestService.getSuggestPaginated(operatingCountryId.toString(), 0, 1)
-      .subscribe(items => {
-        const found = items.find(x =>x.id === operatingCountryId);
-        if (found) {
-          this.ticketForm.get(['operatingAddress', 'countryId']).setValue(found, { emitEvent: false });
-        }
-      })
-    }
-
-    //operating state
-    const operatingStateId = this.ticketForm.get(['operatingAddress', 'stateId']).value;
-    if (operatingStateId) {
-      this.operatingStateSuggestService.getSuggestPaginated(operatingStateId.toString(), 0, 1, registeredCountryId)
-      .subscribe(items => {
-        const found = items.find(x =>x.id === operatingStateId);
-        if (found) {
-          this.ticketForm.get(['operatingAddress', 'stateId']).setValue(found, { emitEvent: false });
-        }
-      })
+      //operating state
+      const operatingStateId = this.ticketForm.get(['operatingAddress', 'stateId']).value;
+      if (operatingStateId) {
+        this.operatingStateSuggestService.getSuggestPaginated(operatingStateId.toString(), 0, 1, operatingCountryId)
+        .subscribe(items => {
+          const found = items.find(x =>x.id === operatingStateId);
+          if (found) {
+            this.ticketForm.get(['operatingAddress', 'stateId']).setValue(found, { emitEvent: false });
+          }
+        })
+      }
     }
 
     //identifier
