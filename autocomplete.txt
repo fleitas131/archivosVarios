@@ -1508,3 +1508,1014 @@ export class EmsEntityEditorComponent implements OnInit, AfterViewInit {
     console.log(this.ticketForm.get(['generalInformation', 'prid']));
   }
 }
+
+////
+HIERARCHY TS
+
+import { AfterContentInit, Component, OnInit, ViewChild } from '@angular/core';
+import { LoadingService } from 'src/app/services/system/loading.service';
+import { BehaviorSubject, lastValueFrom, Observable } from 'rxjs';
+import { FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { System } from 'src/app/core/shared/system.enum';
+import { ActivatedRoute, Router } from '@angular/router';
+import { AppRoute } from 'src/app/app.routes';
+import { DialogService } from 'src/app/core/shared/plugins/dialogs/dialog.service';
+import { TranslateService } from '@ngx-translate/core';
+import { CommentService } from 'src/app/services/ems/comment.service';
+import { EmsSelectMultipleControlSet } from '../ems-entity-editor/ems-entity-controlType.model';
+import { Item } from 'src/app/core/models/base/item.interface';
+import { EntityService } from 'src/app/services/ems/entity.service';
+import { Header, Stage, Status, TicketType } from 'src/app/core/models/ems/base.model';
+import { HierarchyService } from 'src/app/services/ems/hierarchy.service';
+import { ToastrService } from 'ngx-toastr';
+import { IHierarchy, Ticket } from 'src/app/core/models/ems/hierarchy.model';
+import { AuthService } from 'src/app/services/auth.service';
+import { Permission } from 'src/app/core/models/security/permission.enum';
+import { MatTabChangeEvent, MatTabGroup } from '@angular/material/tabs';
+import { chain } from 'lodash';
+
+
+@Component({
+    selector: 'app-hierarchy-editor',
+    templateUrl: './hierarchy-editor.component.html',
+    styleUrls: ['./hierarchy-editor.component.scss'],
+    standalone: false
+})
+export class HierarchyEditorComponent implements OnInit, AfterContentInit {
+  TicketStage = Stage;
+
+  ticketSourceId: number = null;
+  ticketTypeId: number = null;
+  showToggle: Boolean = false;
+  ticketId: number = null;
+  ticketTypeDesc: string = null;
+  tenantId: number = 0;
+  showCommentsAndAtth: boolean = true;
+  showFileManager: boolean = true;
+
+  attachmentFileIds: number[] = [];
+  requiredAttachmentCount: number = 1;
+  commentIds: number[] = [];
+
+  ticketStageDesc: string = null;
+  
+  TicketStatus = Status;
+  _status = new BehaviorSubject(Status.PENDING);
+  set status(v: Status) {
+    this._status.next(v);
+  }  
+  get status(): Status {
+    return this._status.getValue();
+  }
+  get status$(): Observable<Status> {
+    return this._status.asObservable();
+  }  
+
+  createUpdateMode = false;
+  approveMode = false;
+
+  inputLength = System.InputFieldLength;
+
+  hierarchyForm: FormGroup;
+  ticketFormHistory: FormGroup[] = [];
+ 
+  selectMultipleItem = new EmsSelectMultipleControlSet();
+
+  constructor(
+    private router: Router,
+    private entityService: EntityService,
+    private activatedRoute: ActivatedRoute,
+    private loadingService: LoadingService,
+    private formBuilder: FormBuilder,
+    private dialogService: DialogService,
+    private translate: TranslateService,
+    private hierarchyService: HierarchyService,
+    public commentService: CommentService,
+    private toastrService: ToastrService,
+    private authService: AuthService
+  ) { }
+ 
+  ngAfterContentInit(): void {
+    this.loadingService.setSpinner(false, '', '');
+
+    setTimeout(() => {
+      this.activateFragmentNavigation();      
+    }, 300);
+  }
+
+  generateTicketForm(useHistoricalHeader = false): FormGroup {
+    return this.formBuilder.group({
+      header: this.formBuilder.group(!useHistoricalHeader? {
+        ticketId: this.ticketId,
+        ticketCode: null,
+        salesforceAccountId: null,
+        requestor: null,
+        assignee: null,
+        clientType: [true, [Validators.required]],
+        stage: null
+      } : new Header()),
+      generalInformation: this.formBuilder.group({
+        prid: ['', [Validators.required]],
+        partyName: ['', [Validators.required]],
+        entityWithoutHierarchy: [true, []],
+        cesRelationshipUpdated: [true, []]
+      })
+    });
+  }
+
+  @ViewChild('historicalDataTabGroup', {static: false}) historicalDataTabGroup!: MatTabGroup;
+  selectedTabIndex: number = 0;
+  
+  activateFragmentNavigation() {
+    this.activatedRoute.fragment.subscribe(fragment => {
+      fragment ??= Stage[Stage.HierarchyCreationUpdate];
+
+      const tabs = this.historicalDataTabGroup._tabs.toArray();
+      const fragmentTab = tabs.find(x => x.textLabel.replace(/ /gm, '').replace('/', '') == fragment);
+      this.selectedTabIndex = tabs.indexOf(fragmentTab);
+    });
+  }
+
+  ngOnInit(): void {
+    this.hierarchyForm = this.generateTicketForm();
+
+    this.loadSnapshotData();
+
+    console.log(this.hierarchyForm.value);
+
+    this.setMode();
+
+    this.buildHistoricalDataForm();
+
+   //revisamos si tiene EMS User asignado
+    this.hasEMSUser();
+
+    //revisamos si user no es requester
+    this.isNotRequester();
+
+    // if (this.status == this.TicketStatus.CANCELED || this.status == this.TicketStatus.CLOSED) {
+    //   this.hierarchyForm.disable({ emitEvent: false });
+    // }
+
+    // if (this.status == Status.CANCELED || this.status == Status.CLOSED) {
+    //   this.showCommentsAndAtth = false;
+    // }
+
+    // this.hierarchyForm.get(['generalInformation', 'prid']).valueChanges.pipe(
+    //   startWith(''),
+    //   distinctUntilChanged(),
+    //   // delay emits
+    //   debounceTime(1500),
+    //   switchMap(prid => {
+    //     if (prid !== '' && typeof prid == 'string') {
+    //       this.loadingService.setSpinner(true);
+    //       return this.entityService.getByPrid(prid, this.ticketTypeId).pipe(
+    //         map(x => {
+    //           let hierarchy: IHierarchy = {
+    //             generalInformation: Object.assign(new GeneralInformationSection(), x.generalInformation),
+    //             meta: x.meta
+    //           };
+    //           return hierarchy;
+    //         })
+    //       )
+    //     }
+    //     else return of(null);
+    //   }),
+    //   filter(hierarchy => hierarchy != null)
+    // ).subscribe({
+    //   next: hierarchy => {
+    //     if(hierarchy?.generalInformation?.prid != '' && hierarchy?.generalInformation?.prid != null){
+    //       this.patchHierarchy(hierarchy);
+    //     }
+    //   }
+    // })
+
+    if(this.status == this.TicketStatus.PENDING) {
+    // On slide button change
+    this.hierarchyForm.get(['generalInformation', 'entityWithoutHierarchy']).valueChanges
+      .subscribe({
+        next: (noHierarchy: boolean) => {
+          const validators = noHierarchy ?
+            [Validators.required] :
+            [];
+          
+          this.hierarchyForm.get(['generalInformation', 'prid']).clearValidators();
+          this.hierarchyForm.get(['generalInformation', 'partyName']).clearValidators();
+
+          this.hierarchyForm.get(['generalInformation', 'prid']).addValidators(validators)
+          this.hierarchyForm.get(['generalInformation', 'partyName']).addValidators(validators);
+
+          this.hierarchyForm.updateValueAndValidity();
+
+          this.requiredAttachmentCount = noHierarchy ? 0 : 1;
+
+          /*if (this.attachmentFileIds.length < this.requiredAttachmentCount) {
+            this.toastrService.warning(this.translate.instant('TOASTR.ATTACHMENT-REQUIRED-ERROR'));
+          }*/
+        }
+      });
+    }
+
+    //CES Toggle
+    this.setMutualExclusion();
+    //toggle submit disable control
+    this.toggleSubmitDisable();
+
+    if (
+      this.status == Status.CANCELED ||
+      this.status == Status.CLOSED ||
+      (this.canSubmit() && this.status == Status.OPEN) ||
+      (this.canApprove() && this.status == Status.PENDING)
+    ) {
+      this.hierarchyForm.disable({ emitEvent: false });
+      this.showFileManager = false;
+    }
+
+    if(this.status == Status.CANCELED || this.status == Status.CLOSED){
+      this.showCommentsAndAtth = false;
+    }
+
+  }
+
+  //prid solo acepta numeros
+  numbersOnly(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    let cleaned = input.value.replace(/\D+/g, '');
+    cleaned = cleaned.slice(0,9);
+    input.value = cleaned;
+    this.hierarchyForm.get(['generalInformation', 'prid']).setValue(cleaned, { emitEvent: false });
+  }
+
+  //vemos si tiene user asignado
+  hasEMSUser(): boolean{
+    let check: boolean = false;
+    
+    const assigneeEmail = this.hierarchyForm.get(['header', 'assignee']).value;
+    const emsUserEmail = this.authService.currentUser.email;
+
+    if (assigneeEmail != null && assigneeEmail == emsUserEmail && this.canApprove()) {
+      check = true;
+    }
+
+    return check;
+  }
+
+  //si es ems user puede cancelar el ticket
+  isNotRequester(): boolean{
+    let check: boolean = false;
+    
+    const isNotReq = this.authService.currentUser.roles[0].id;
+
+    if (isNotReq != 1 && this.hasEMSUser())
+    {
+      this.approveMode = true;
+      check = true;
+    }
+
+    return check;
+  }
+
+  //CES & Hierarchy toggle exclusion
+  private setMutualExclusion()
+  {
+    const entityCtrl = this.hierarchyForm.get(['generalInformation', 'entityWithoutHierarchy']);
+    const cesCtrl = this.hierarchyForm.get(['generalInformation', 'cesRelationshipUpdated']);
+
+    entityCtrl?.valueChanges.subscribe(value => {
+      if (value === true)
+      {
+        cesCtrl?.setValue(false, { emitEvent: false });
+      }
+    });
+    
+    cesCtrl?.valueChanges.subscribe(value => {
+      if (value === true)
+      {
+        entityCtrl?.setValue(false, { emitEvent: false });
+      }
+    });
+  }
+
+  //submit toggle disable control
+  toggleSubmitDisable()
+  {
+    const entityCtrl = this.hierarchyForm.get(['generalInformation', 'entityWithoutHierarchy']);
+    const cesCtrl = this.hierarchyForm.get(['generalInformation', 'cesRelationshipUpdated']);
+    let submitDisable: boolean = false
+
+    if (!entityCtrl.value && !cesCtrl.value)
+    {
+      submitDisable = true;
+    }
+
+    return submitDisable;
+  }
+
+  get pridToolTip(): string | null {
+
+    let tipMessage: string = "";
+
+    if (this.status == 1)
+    {
+      tipMessage = "Buscar en CES el PRID.\nEjemplo:\nPRID: 230618\nParty Name: IBM ARGENTINA SRL";
+    }
+    
+    return tipMessage;
+  }
+
+  isHistoricaModeAvailable(): boolean {
+    return [
+      TicketType.SalesforceOpportunity,
+      TicketType.EntityVerification
+    ].includes(this.ticketTypeId)
+  }
+
+  navigateToHistoricalData(event: MatTabChangeEvent) {
+    const stage = Stage[
+      event.tab.textLabel
+        .replace(/ /gm, '')
+        .replace('/', '') as keyof typeof Stage
+    ];
+  
+    let linkObj = null;
+  
+    switch (stage) {
+      case Stage.EntityCreation: linkObj = [AppRoute.ENTITY, AppRoute.CREATE, this.ticketId]; break;
+      case Stage.EntityUpdate: linkObj = [AppRoute.ENTITY, AppRoute.UPDATE, this.ticketId]; break;
+      case Stage.EntityVerification: linkObj = [AppRoute.VERIFICATION, this.ticketId]; break;
+      
+      default: linkObj = null; break;
+    }
+  
+    linkObj.unshift(AppRoute.EMS);
+    linkObj.unshift(AppRoute.ROOT);
+  
+    this.router.navigate(linkObj, {
+      fragment: Stage[stage]
+    });
+  }  
+ 
+  patchHierarchy(hierarchy: IHierarchy) {
+    if (!hierarchy) return;
+
+    if (hierarchy.meta?.outputEntityMessage) {
+      this.toastrService.warning(hierarchy.meta.outputEntityMessage);
+      return;
+    }
+
+    this.hierarchyForm.get(['generalInformation']).patchValue(hierarchy.generalInformation, { emitEvent: false });
+
+    this.markFormAsTouched();
+  }
+
+  patchTicket(ticket: Ticket) {
+    if (!ticket) return;
+    this.patchHierarchy(ticket);
+
+    this.ticketId = ticket.header.ticketId;
+    this.status = ticket.header.status;
+    this.ticketTypeDesc = ticket.header.ticketTypeDesc;
+    this.ticketStageDesc = ticket.header.ticketStageDesc;
+    this.ticketTypeId = ticket.header.ticketTypeId;
+
+  
+
+    this.tenantId = ticket.header.tenantId;
+    this.hierarchyForm.get('header').patchValue(ticket.header, { emitEvent: false });
+
+    if(ticket.header.ticketTypeDesc == 'Salesforce Opportunity' || ticket.header.ticketTypeDesc == 'Entity Verification' || ticket.header.ticketTypeDesc == 'Entity Creation & Verification'){
+      this.showToggle = true;
+      this.requiredAttachmentCount = ticket.generalInformation.entityWithoutHierarchy ? 0 : 1;
+      
+
+    }
+
+    this.hierarchyForm.get(['generalInformation', 'cesRelationshipUpdated']).patchValue(ticket.generalInformation.cesRelationshipUpdated, { emitEvent: false });
+  }
+
+    private markFormAsTouched(formGroup: FormGroup = this.hierarchyForm) {
+    (<any>Object).values(formGroup.controls).forEach((control: any) => {
+      if (control.controls) {
+        this.markFormAsTouched(control);
+      }
+      else {
+        control.markAsTouched();
+      }
+    });
+  }
+
+  getSubform(subformName: string | string[]): FormGroup {
+    return <FormGroup>this.hierarchyForm.get(subformName);
+  }
+
+  loadSnapshotData() {
+    this.ticketSourceId = this.activatedRoute.snapshot.data['entitySourceId'] as number;
+    this.ticketTypeId = this.activatedRoute.snapshot.data['ticketTypeId'] as number;
+
+    const ticket = this.activatedRoute.snapshot.data['ticket'] as Ticket;
+
+    if (!!ticket) this.patchTicket(ticket);
+    else this.hierarchyForm.get(['header', 'requestor']).patchValue(this.authService.currentUser.email);
+
+
+    // SELECT ITEMS
+    this.selectMultipleItem.generalInformation.entityTypeId = this.activatedRoute.snapshot.data['entityTypes'] as Item[] | [];
+  }
+
+  buildHistoricalDataForm() {
+    const ticketHistory = this.activatedRoute.snapshot.data['ticketHistory'] as Ticket[];
+    
+    for (const item of ticketHistory) {
+      const historicalTicketForm = this.generateTicketForm(true);
+    
+      historicalTicketForm.get('header').patchValue(item.header, { emitEvent: false });
+      historicalTicketForm.get('generalInformation').patchValue(item.generalInformation, { emitEvent: false });
+          
+      historicalTicketForm.disable({ emitEvent: false });
+    
+      this.ticketFormHistory.push(historicalTicketForm);
+    }
+  }
+
+
+  setMode() {
+    this.createUpdateMode = !!(this.activatedRoute.snapshot.data[
+      'createUpdateMode'
+    ] as boolean);
+    this.approveMode = !!(this.activatedRoute.snapshot.data[
+      'approveMode'
+    ] as boolean);
+  }
+
+  // -----------------
+  // ACTIONS
+  // -----------------
+
+  showTicketHistory() {
+    this.dialogService.openTicketHistoryDialog(this.ticketId);
+  }
+
+  createNewEntity() {
+    //this.router.navigate(['/', AppRoute.EMS, AppRoute.ENTITY, AppRoute.CREATE]);
+    const url = this.router.serializeUrl(this.router.createUrlTree([`/${AppRoute.EMS}/${AppRoute.ENTITY}/${AppRoute.CREATE}`]))
+    window.open(url,'_blank')
+  }
+
+  close() {
+    this.loadingService.setSpinner(true);
+    this.router.navigate(['/', this.ticketId ? AppRoute.OVERVIEW : AppRoute.DASHBOARD]);
+  }
+
+  async cancel() {
+    const confirm = await lastValueFrom(
+      this.dialogService.openConfirmDialog(this.translate.instant('TOASTR.CANCELATION-MESSAGE'), '').afterClosed()
+    );
+    if (!confirm) return;
+
+    this.loadingService.setSpinner(true);
+    const result = await lastValueFrom(
+      this.hierarchyService.cancel(this.ticketId)
+    );
+
+    this.router.navigate(['/', AppRoute.OVERVIEW]);
+  }
+
+  //nuevo cancel con comentario
+  async newCancel()
+  {
+    let ticket = this.getTicketFromForm();
+
+    this.hierarchyForm.updateValueAndValidity();
+    // if (this.ticketForm.invalid) {
+    //   this.toastrService.error(this.translate.instant('TOASTR.ENTITY-ERROR'))
+    //   return;
+    // }
+    
+    const dialogData = await lastValueFrom(
+      this.dialogService.openCancelDialog(this.translate.instant('TOASTR.CANCELATION-MESSAGE'), '').afterClosed() 
+    );
+    if (!dialogData.cancelled) return;
+    
+    this.loadingService.setSpinner(true);
+    const result = await lastValueFrom(
+      this.hierarchyService.newCancel(this.ticketId, dialogData.cancelMessage)
+    );
+
+    this.router.navigate(['/', AppRoute.OVERVIEW]);
+  }
+
+  private getTicketFromForm(): Ticket {
+    let ticket = Object.assign(
+      new Ticket(),
+      this.hierarchyForm.getRawValue()
+    ) as Ticket;
+
+    ticket.header.sourceId = this.ticketSourceId;
+    ticket.header.ticketTypeId = this.ticketTypeId;
+    ticket.header.fileIds = this.attachmentFileIds;
+    ticket.header.commentIds = this.commentIds;
+
+    return ticket;
+  }
+
+  updateAttachmentFileIds(fileIds: number[]) {
+    this.attachmentFileIds = fileIds;
+
+    if (this.status == this.TicketStatus.PENDING) {
+      // ATTACHMENT COUNT CHECK
+      /*if (this.attachmentFileIds.length < this.requiredAttachmentCount) {
+        this.toastrService.warning(
+          this.translate.instant('TOASTR.ATTACHMENT-REQUIRED-ERROR')
+        );
+      }*/
+    }
+      
+
+  }
+
+  updateCommentIds(commentsIds: number[]) {
+    this.commentIds = commentsIds;
+  }
+
+  async submit() {
+    let ticket = this.getTicketFromForm();
+
+    this.hierarchyForm.updateValueAndValidity();
+    if (this.hierarchyForm.invalid) {
+      this.toastrService.error(this.translate.instant('TOASTR.ENTITY-ERROR'))
+      return;
+    }
+    
+    const confirm = await lastValueFrom(
+      this.dialogService.openConfirmDialog(this.translate.instant('TOASTR.CONFIRMATION-MESSAGE'), '').afterClosed()
+    );
+    if (!confirm) return;
+
+    this.loadingService.setSpinner(true);
+    const result = await lastValueFrom(
+      this.hierarchyService.submit(ticket)
+    );
+   
+    this.ticketId = result.header.ticketId;
+    this.status = result.header.status;
+    
+    this.hierarchyForm.get('header').patchValue(result.header, { emitEvent: false });
+    this.router.navigate(['/', AppRoute.OVERVIEW]);
+  }
+
+  async accept() {
+    let ticket = this.getTicketFromForm();
+
+    this.hierarchyForm.updateValueAndValidity();
+    if (this.hierarchyForm.invalid) {
+      this.toastrService.error(this.translate.instant('TOASTR.ENTITY-ERROR'))
+      return;
+    }
+    
+    const confirm = await lastValueFrom(
+      this.dialogService.openConfirmDialog(this.translate.instant('TOASTR.APPROVAL-MESSAGE'), '').afterClosed()
+    );
+    if (!confirm) return;
+   
+    const sourceDesc = 
+    (this.ticketTypeDesc == 'Salesforce Opportunity' || this.ticketTypeDesc == 'Entity Verification' || this.ticketTypeDesc == 'Entity Creation & Verification') 
+    ? 'Automatico' : 'EMS Tool';
+
+    this.loadingService.setSpinner(true);
+    const result = await lastValueFrom(
+      this.hierarchyService.accept(ticket, sourceDesc)
+    );
+
+    this.router.navigate(['/', AppRoute.OVERVIEW]);
+  }
+
+  async reject() {
+    let ticket = this.getTicketFromForm();
+
+    this.hierarchyForm.updateValueAndValidity();
+    // if (this.hierarchyForm.invalid) {
+    //   this.toastrService.error(this.translate.instant('TOASTR.ENTITY-ERROR'))
+    //   return;
+    // }
+    
+    const dialogData = await lastValueFrom(
+      this.dialogService.openRejectDialog(this.translate.instant('TOASTR.REJECT-MESSAGE'), '').afterClosed()
+    );
+    if (!dialogData.rejected) return;
+    
+    this.loadingService.setSpinner(true);
+    const result = await lastValueFrom(
+      this.hierarchyService.reject(ticket, dialogData.rejectionMessage)
+    );
+
+    this.router.navigate(['/', AppRoute.OVERVIEW]);
+  }
+
+  canApprove(): boolean {
+    const permissions = [Permission.HierarchyApproval];
+    const stage = this.hierarchyForm.get(["header", "stage"]).value as Stage;
+
+    return this.authService.isAuthorized(permissions) && stage == Stage.HierarchyCreationUpdate;
+  }  
+
+  canSubmit(): boolean {
+    return this.authService.isAuthorized(Permission.HierarchyEdit) 
+    //&& ((userTenantId == userTenantId) || this.ticketId <= 0 || this.ticketId == null);
+  }  
+
+  test() {
+
+    console.log("toggleSubmitDisable", this.toggleSubmitDisable());
+    console.log("disableSubmit", this.disableSubmit()); 
+  }
+
+  disableSubmit(): boolean {
+    const disable = (this.hierarchyForm.invalid ||
+            ((this.attachmentFileIds.length < this.requiredAttachmentCount) && (this.toggleSubmitDisable() === true && this.showToggle === true)) || 
+            ((this.attachmentFileIds.length < this.requiredAttachmentCount) && this.ticketTypeId == 4) 
+          )
+          return disable;           
+  }
+
+  // (this.hierarchyForm.invalid ||
+  //           (this.attachmentFileIds.length < requiredAttachmentCount) &&
+  //           (this.toggleSubmitDisable() === true && this.showToggle === true)
+  //         )
+
+
+}
+
+
+////
+
+HIERARCHY HTML
+
+<!-- Page body -->
+<section class="section">
+  <!-- DESCRIPTION -->
+  <div
+    class="dpe-component-wrapper pwc-forms tab-card-header backgroud-color-f2"
+    >
+    <h2 class="h4 card-title" style="text-transform: capitalize">
+      {{ "EMS.HIERARCHY-EDITOR.TITLE" | translate }}
+    </h2>
+
+    <div class="row">
+      <div class="col-8">
+        <div class="row">
+          <div class="col-6 header-field">
+            <span class="header-field-label"
+              >{{ "EMS.ENTITY-EDITOR.HEADER.TICKET-CODE" | translate }}:
+            </span>
+            <span>{{ hierarchyForm.get(["header", "ticketCode"]).value }}</span>
+          </div>
+          <div class="col-6 header-field">
+            <span class="header-field-label"
+              >{{
+              "EMS.HIERARCHY-EDITOR.HEADER.ACCOUNT-ID-SALESFORCE" | translate
+              }}:
+            </span>
+            <span>{{
+              hierarchyForm.get(["header", "salesforceAccountId"]).value
+            }}</span>
+          </div>
+          <div class="col-6 header-field">
+            <span class="header-field-label"
+              >{{ "EMS.HIERARCHY-EDITOR.HEADER.REQUESTOR" | translate }}:
+            </span>
+            <span>{{ hierarchyForm.get(["header", "requestor"]).value }}</span>
+          </div>
+          <div class="col-6 header-field">
+            <span class="header-field-label"
+              >{{ "EMS.HIERARCHY-EDITOR.HEADER.ASSIGNED-TO" | translate }}:
+            </span>
+            <span>{{ hierarchyForm.get(["header", "assignee"]).value }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="col-4 header-buttons">
+        <ng-container [ngTemplateOutlet]="form_buttons"> </ng-container>
+      </div>
+    </div>
+  </div>
+
+  <ng-container
+    [ngTemplateOutlet]="entityDataContainer"
+    [ngTemplateOutletContext]="{ historicalMode: isHistoricaModeAvailable() }"
+    >
+  </ng-container>
+</section>
+
+<ng-template #form_buttons>
+  <div class="row">
+    <div class="col-12" style="text-align: end; margin-bottom: 1em">
+      @if (ticketId != null) {
+        <button
+          mat-icon-button
+          class="ticket-history-button"
+          (click)="showTicketHistory()"
+          matTooltipPosition="above"
+          [matTooltip]="'BUTTONS.TOOLTIP.TICKET-HISTORY' | translate"
+          >
+          <mat-icon id="ticket-history-button-icon">history</mat-icon>
+        </button>
+      }
+
+      <button
+        mat-icon-button
+        (click)="close()"
+        style="margin-left: 1rem"
+        matTooltipPosition="above"
+        [matTooltip]="'BUTTONS.CLOSE' | translate"
+        >
+        <mat-icon id="ticket-history-button-icon">close</mat-icon>
+      </button>
+    </div>
+
+    <div class="col-12" style="text-align: end">
+      @if (approveMode && hasEMSUser()) {
+        <button
+          class="cancel-btn btn"
+          (click)="newCancel()"
+          >
+          {{ "BUTTONS.CANCEL" | translate }}
+        </button>
+      }
+
+      @if (status == TicketStatus.PENDING && canSubmit()) {
+          <button
+            class="accept-btn btn"
+            role="button"
+            aria-describedby="formDisclaimerContextBlock"
+            style="margin-left: 4em"
+            (click)="submit()"
+            [disabled]="disableSubmit()"
+            >
+            {{ "BUTTONS.SUBMIT" | translate }}
+          </button>
+      }
+
+      @if (status == TicketStatus.OPEN && hasEMSUser()) {
+        <button
+          class="reject-btn btn"
+          role="button"
+          aria-describedby="formDisclaimerContextBlock"
+          (click)="reject()"
+          >
+          {{ "BUTTONS.REJECT" | translate }}
+        </button>
+        <button
+          class="accept-btn btn"
+          role="button"
+          aria-describedby="formDisclaimerContextBlock"
+          (click)="accept()"
+          >
+          {{ "BUTTONS.ACCEPT" | translate }}
+        </button>
+      }
+    </div>
+  </div>
+</ng-template>
+
+<ng-template #entityDataContainer let-historicalMode="historicalMode">
+  @if (historicalMode && ticketFormHistory.length) {
+    <!-- HISTORICAL ENTITY DATA -->
+    <mat-tab-group
+      [(selectedIndex)]="selectedTabIndex"
+      (selectedTabChange)="navigateToHistoricalData($event)"
+      #historicalDataTabGroup
+      >
+
+      <!-- PREVIOUS STAGE -->
+      @for (historicalItem of ticketFormHistory; track $index) {
+        <mat-tab [label]="historicalItem.get(['header', 'ticketStageDesc']).value">
+          <div class="entity-stage-tab">
+            @if (
+              historicalItem.get(['header', 'stage']).value ==
+              TicketStage.HierarchyCreationUpdate
+              ) {
+              <ng-container
+                [ngTemplateOutlet]="entityForm"
+          [ngTemplateOutletContext]="{
+            entityForm: historicalItem,
+            historicalMode: true
+          }"
+                >
+              </ng-container>
+            }
+          </div>
+        </mat-tab>
+      }
+      <!-- CURRENT STAGE -->
+      @if ([TicketStatus.OPEN, TicketStatus.PENDING].includes(status)) {
+        <mat-tab
+          [label]="ticketStageDesc"
+          >
+          <div class="entity-stage-tab">
+            @if (
+              hierarchyForm.get(['header', 'stage']).value ==
+              TicketStage.HierarchyCreationUpdate
+              ) {
+              <ng-container
+                [ngTemplateOutlet]="entityForm"
+          [ngTemplateOutletContext]="{
+            entityForm: hierarchyForm,
+            historicalMode: false
+          }"
+                >
+              </ng-container>
+            }
+          </div>
+        </mat-tab>
+      }
+    </mat-tab-group>
+  } @else {
+    <!-- NEW HIERARCHY OR NON SF TICKET -->
+    <ng-container
+      [ngTemplateOutlet]="entityForm"
+    [ngTemplateOutletContext]="{
+      entityForm: hierarchyForm,
+      historicalMode: false
+    }"
+      >
+    </ng-container>
+  }
+</ng-template>
+
+<!-- ENTITY TEMPLATE -->
+<ng-template
+  #entityForm
+  let-entityForm="entityForm"
+  let-historicalMode="historicalMode"
+  >
+  <div class="" id="hierarchy-form">
+    <form [formGroup]="entityForm" class="form-layout backgroud-color-gr">
+      <div class="row" style="margin: 10px !important">
+        <div class="col-9">
+          <div class="card subform">
+            <div class="card-body" id="card-form-hierarchy">
+              <div class="dpe-component-wrapper pwc-forms" id="hierarchy-ems">
+                <!-- FORM   -->
+                <div class="row" id="general-info-hierarchy">
+                  <div class="col-12 form-field">
+                    <div class="subform-title">
+                      {{
+                      "EMS.HIERARCHY-EDITOR.GENERAL-INFORMATION.TITLE"
+                      | translate
+                      }}
+                    </div>
+                  </div>
+                  <div class="col-3 form-field" id="hierarchy-partyid">
+                    <app-text-input
+                      [formGroup]="$any(entityForm.get('generalInformation'))"
+                      controlName="prid"
+                      [maxLength]="inputLength"
+                      [label]="
+                        'EMS.HIERARCHY-EDITOR.GENERAL-INFORMATION.PRID'
+                          | translate
+                      "
+                      [matTooltip]="'EMS.HIERARCHY-EDITOR.GENERAL-INFORMATION.TOOLTIP-TEXT' | translate"
+                      matTooltipClass="pridtootltip"
+                      (input)="numbersOnly($event)"
+                      >
+                    </app-text-input>
+                  </div>
+                  <div class="col-9 form-field" id="hierarchy-partyname">
+                    <app-text-input
+                      [formGroup]="$any(entityForm.get('generalInformation'))"
+                      controlName="partyName"
+                      [maxLength]="inputLength"
+                      [label]="
+                        'EMS.HIERARCHY-EDITOR.GENERAL-INFORMATION.ENTITY-NAME'
+                          | translate
+                      "
+                      >
+                    </app-text-input>
+                  </div>
+                </div>
+                <!-- END FORM -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-3">
+          @if (canSubmit()) {
+            <div class="card new-entity-container">
+              <div class="card-body">
+                <!-- FORM   -->
+                <div
+                  class="row"
+                  style="margin: 5px !important; align-content: inherit"
+                  >
+                  <div
+                    class="col-4 backgroud-color-gr"
+                    style="align-content: center"
+                    >
+                    <img
+                      src="../../../../assets/Icons/entity_creation.svg"
+                      alt=""
+                      class="icon-folder"
+                      />
+                    </div>
+                    <div class="col-8">
+                      <span>
+                        {{ "EMS.HIERARCHY-EDITOR.NEW-ENTITY" | translate }}
+                      </span>
+                    </div>
+                  </div>
+                  <div class="" style="margin: 5px !important">
+                    <div class="col-12">
+                      <button
+                        class="pwc-forms__btn btn btn--transparent btn-sm"
+                        id="button-create-hierarchy"
+                        (click)="createNewEntity()"
+                        style="width: inherit"
+                        >
+                        {{ "BUTTONS.CREATE-NEW-ENTITY" | translate }}
+                      </button>
+                    </div>
+                  </div>
+                  <!-- END FORM -->
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div class="backgroud-color-gr">
+      <div class="row" style="margin: 10px !important">
+        <div class="col-7">
+          <p
+            [innerHtml]="'EMS.HIERARCHY-EDITOR.PURPOSE' | translate | newLine"
+            class="purpose-container"
+          ></p>
+        </div>
+        <div class="col-5">
+          <img
+            class="hierarchy-img"
+            src="../../../assets/svg/Mensaje Soporte Hierarchy Create Update (New 2.0)-cropped.svg"
+            alt="hierarchy-img"
+            />
+          </div>
+        </div>
+
+        <!-- <div > -->
+        <div class="row">
+          @if (this.showToggle) {
+            <div>
+              <form [formGroup]="getSubform('generalInformation')">
+                <div class="hierarchy-slide-toggle">
+                  <mat-slide-toggle
+                    formControlName="entityWithoutHierarchy"
+                    labelPosition="before"
+                    >
+                    <span class="bold label">{{
+                      "EMS.HIERARCHY-EDITOR.HAS-HIERARCHY" | translate
+                    }}</span>
+                  </mat-slide-toggle>
+                  <mat-slide-toggle
+                    formControlName="cesRelationshipUpdated"
+                    labelPosition="before"
+                    >
+                    <span class="bold label">{{
+                      "EMS.HIERARCHY-EDITOR.CES-UPDATED-RELATIONSHIP" | translate
+                    }}</span>
+                  </mat-slide-toggle>
+                </div>
+              </form>
+            </div>
+          }
+        </div>
+
+        <div class="row">
+          <div class="col-6">
+            <app-file-manager
+              [ticketId]="entityForm.get(['header', 'ticketId']).value"
+              [canDownloadTemplate]="true"
+              [canAttach]="showFileManager"
+              (fileUploaded)="updateAttachmentFileIds($event)"
+              [historicalMode]="historicalMode"
+              [stageId]="entityForm.get(['header', 'stage']).value"
+              >
+            </app-file-manager>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-6">
+            <app-comments-input
+              [expanded]="true"
+              [ticketId]="entityForm.get(['header', 'ticketId']).value"
+              [commentService]="commentService"
+              [canAddComment]="showCommentsAndAtth"
+              (onComment)="updateCommentIds($event)"
+              [historicalMode]="historicalMode"
+              [stageId]="entityForm.get(['header', 'stage']).value"
+            ></app-comments-input>
+          </div>
+        </div>
+      </div>
+    </ng-template>
+
