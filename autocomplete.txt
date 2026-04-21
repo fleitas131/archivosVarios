@@ -1,1251 +1,513 @@
-import { AfterViewInit, ChangeDetectorRef, Component, OnInit, ViewChild } from '@angular/core';
+import {
+  Component,
+  OnDestroy,
+  OnInit,
+  ViewChild,
+  AfterViewInit,
+} from '@angular/core';
+import { OverviewService } from '../../../services/ticket-overview/overview.service';
+import { AppRoute } from '../../../app.routes';
+import { MatPaginator } from '@angular/material/paginator';
+import { MatSort, Sort, SortDirection } from '@angular/material/sort';
+import { ITableParams } from '../../../core/models/base/paged-result.model';
+import { TicketOverview } from '../../../core/models/ticket-overview/ticket-overview.model';
+import { MatTableDataSource } from '@angular/material/table';
+import { BehaviorSubject, merge, Subject, switchMap, tap, timeout } from 'rxjs';
+import { GenericFilter } from '../../../core/models/base/filter/generic-filter';
+import { FormBuilder, FormGroup } from '@angular/forms';
+import { StorageService } from '../../../services/system/storage.service';
+import { ChangeRequestorDialogComponent } from '../../dialog/change-requestor-dialog/change-requestor-dialog.component';
+import { MatDialog } from '@angular/material/dialog';
+import { Item } from '../../../core/models/base/item.interface';
+import { AssigmentRequest } from '../../../core/models/userAssignment/assigmentRequest.model';
+import { AuthService } from '../../../services/auth.service';
 import { LoadingService } from 'src/app/services/system/loading.service';
-import { BehaviorSubject, debounceTime, distinctUntilChanged, filter, lastValueFrom, Observable, of, startWith, switchMap } from 'rxjs';
-import { AbstractControl, FormArray, FormBuilder, FormControl, FormGroup, ValidatorFn, Validators } from '@angular/forms';
-import { System } from 'src/app/core/shared/system.enum';
 import { ActivatedRoute, Router } from '@angular/router';
-import { KeyValue } from '@angular/common';
-import { Item } from 'src/app/core/models/base/item.interface';
-import { RegisteredStateSuggestService } from 'src/app/services/suggest/registered-state.suggest.service';
-import { ISuggestService } from 'src/app/core/shared/plugins/suggest-input/ISuggestService';
-import { AppRoute } from 'src/app/app.routes';
-import { DialogService } from 'src/app/core/shared/plugins/dialogs/dialog.service';
-import { TranslateService } from '@ngx-translate/core';
-import { TicketService } from 'src/app/services/ems/ticket.service';
-import { Ticket, IEntity } from 'src/app/core/models/ems/ticket.model';
-import { CommentService } from 'src/app/services/ems/comment.service';
-import { IdentifierTypeSuggestService } from 'src/app/services/suggest/identifier-type.suggest.service';
-import { PartyTypeSuggestService } from 'src/app/services/suggest/party-type.suggest.service';
-import { OrganisationTypeSuggestService } from 'src/app/services/suggest/organization-type.suggest.service';
-import { OperatingStateSuggestService } from 'src/app/services/suggest/operating-state.suggest.service';
-import { RegulatorSuggestService } from 'src/app/services/suggest/regulator.suggest.service';
-import { SubclassificationSuggestService } from 'src/app/services/suggest/subclassification.suggest.service';
-import { SuplementalInformationSuggestService } from 'src/app/services/suggest/suplementalInformation.suggest.service';
-import { StockExchangeSuggestService } from 'src/app/services/suggest/stockExchange.suggest.service';
-import { SubindustrySuggestService } from 'src/app/services/suggest/subindustry.suggest.service';
-import { EmsSelectControlSet, EmsSelectMultipleControlSet, EmsSuggestControlSet } from './ems-entity-controlType.model';
-import { ToastrService } from 'ngx-toastr';
-import { EntityService } from 'src/app/services/ems/entity.service';
-import { Address, Header, Stage, Status, TicketType } from 'src/app/core/models/ems/base.model';
-import { PracticeSegmentSuggestService } from 'src/app/services/suggest/practice-segment.suggest.service';
-import { RegisteredCountrySuggestService } from 'src/app/services/suggest/registered-country.suggest.service';
-import { OperatingCountrySuggestService } from 'src/app/services/suggest/operating-country.suggest.service';
-import { AuthService } from 'src/app/services/auth.service';
-import { PartnerSuggestService } from 'src/app/services/suggest/partner.suggest.service';
-import { ManagerSuggestService } from 'src/app/services/suggest/manager.suggest.service';
+import { AssignUserDialogComponent } from '../../dialog/assign-user-dialog/assign-user-dialog.component';
+import { DatePipe } from '@angular/common';
+import { RequestorSuggestService } from 'src/app/services/suggest/requestor.suggest.service';
+import { EmsUserSuggestService } from 'src/app/services/suggest/ems-user.suggest.service';
 import { Permission } from 'src/app/core/models/security/permission.enum';
-import { MatTabChangeEvent, MatTabGroup } from '@angular/material/tabs';
-import { UserService } from 'src/app/services/user/user.service';
-import { Role } from 'src/app/core/models/security/role.enum';
-import { tick } from '@angular/core/testing';
-
 
 @Component({
-  selector: 'app-ems-entity-editor',
-  templateUrl: './ems-entity-editor.component.html',
-  styleUrls: ['./ems-entity-editor.component.scss'],
-  standalone: false
+    selector: 'app-overview',
+    templateUrl: './overview.component.html',
+    styleUrl: './overview.component.scss',
+    standalone: false
 })
-export class EmsEntityEditorComponent implements OnInit, AfterViewInit {
-  AppRoute = AppRoute;
-  
-  ticketSourceId: number = null;
-  ticketTypeId: number = null;
-  
-  ticketId: number = null;
-  tenantId: number = 0;
-  sourceDesc: string = null;
-  ticketTypeDesc: string = null;
-  ticketStageDesc: string = null;
-  TicketStage = Stage;
-  showCommentsAndAtth: boolean = true;
+export class OverviewComponent implements OnInit, OnDestroy {
+  routes = AppRoute;
+  isFilterOpen = false;
+  isButtonDisabled = true;
 
-  attachmentFileIds: number[] = [];
-  commentIds: number[] = [];
-  
-  TicketStatus = Status;
-  _status = new BehaviorSubject(Status.PENDING);
+  @ViewChild(MatPaginator) paginator: MatPaginator;
+  @ViewChild(MatSort) sort: MatSort;
+  tableParams: ITableParams;
 
-  set status(v: Status) {
-    this._status.next(v);
-  }  
-  get status(): Status {
-    return this._status.getValue();
+  entityVisibleProperties = Object.getOwnPropertyNames(new TicketOverview())
+    .filter(
+      (x) =>
+        x != 'id' &&
+        x != 'tenantId' &&
+        x != 'ticketStatus' &&
+        x != 'ticketCode' &&
+        x != 'requesterUserId' &&
+        x != 'assignedUserId' 
+        //x != 'requesterLoS'
+    )
+    .map((x) => x.toUpperCase());
+
+  readonly entityFields = [...this.entityVisibleProperties];
+
+  readonly sortings = [...this.entityVisibleProperties];
+  searchFormBackUp: any;
+
+  getDisplayedColumns(): string[] {
+    return [
+      'CHECK',
+      'TICKETCODE',
+      'TICKETSTATUS',
+      ...this.entityFields,
+      //'ACTIONS',
+    ];
   }
-  get status$(): Observable<Status> {
-    return this._status.asObservable();
-  }  
-  
-  createMode = false;
-  updateMode = false;
-  detailMode = false;
-  approveMode = false;
 
-  isEMSUser = false;
-  
-  inputLength = System.InputFieldLength;
-  pridInputLength: number = 9;
-  
-  ticketForm: FormGroup;
-  ticketFormHistory: FormGroup[] = [];
-  
-  selectMultipleItem = new EmsSelectMultipleControlSet();
-  selectItem = new EmsSelectControlSet();
-  
-  suggestItem = new EmsSuggestControlSet();
-  
-  copyAddressEnabled: boolean = false;
-  uniqueAddress: boolean = false;
+  ticketsId: number[] = [];
+  assignedUsersId: number[] = [];
+  userAssgmentRequest: AssigmentRequest[] = [];
+  requesterUsersId: number[] = [];
+  changeRequestorRequest: AssigmentRequest[] = [];
+
+  readonly TABLE_PARAMS_TOKEN = 'overview-tableParams';
+  dataSource = new MatTableDataSource<TicketOverview>([]);
+  dataTable$: Subject<TicketOverview[]> = new Subject();
+
+  formBuilder: FormBuilder = new FormBuilder();
+  searchForm: FormGroup;
+  tableCountSubject = new BehaviorSubject<number>(0);
+
+  unsubscribeAll: Subject<void>;
+
+  tenantsItem: Item[] = [];
+  statusItem: Item[] = [];
+  stageItem: Item[] = [];
+  ticketTypesItem: Item[] = [];
+
+  userTerritory: string;
 
   constructor(
-    private router: Router,
-    private activatedRoute: ActivatedRoute,
-    private loadingService: LoadingService,
-    private formBuilder: FormBuilder,
-    private dialogService: DialogService,
-    private translate: TranslateService,
-    private ticketService: TicketService,
-    private entityService: EntityService,
-    public commentService: CommentService,
-    private toastrService: ToastrService,
+    private dialog: MatDialog,
     private authService: AuthService,
-    private userService: UserService,
-    // SUGGEST SERVICES
-    public registeredCountrySuggestService: RegisteredCountrySuggestService,
-    public registeredStateSuggestService: RegisteredStateSuggestService,
-    public operatingCountrySuggestService: OperatingCountrySuggestService,
-    public operatingStateSuggestService: OperatingStateSuggestService,
-    public partyTypeSuggestService: PartyTypeSuggestService,
-    public identifierTypeSuggestService: IdentifierTypeSuggestService,
-    public organizationTypeSuggestService: OrganisationTypeSuggestService,
-    public regulatorSuggestService: RegulatorSuggestService,
-    public subclassificationSuggestService: SubclassificationSuggestService,
-    public supplementalInformationSuggestService: SuplementalInformationSuggestService,
-    public stockExchangeSuggestService: StockExchangeSuggestService,
-    public subindustrySuggestService: SubindustrySuggestService,
-    public partnerSuggestService: PartnerSuggestService,
-    public localPartnerSuggestService: PartnerSuggestService,
-    public managerSuggestService: ManagerSuggestService,
-    public localManagerSuggestService: ManagerSuggestService,
-    public practiceSegmentSuggestService: PracticeSegmentSuggestService,
-    private cdr: ChangeDetectorRef,
-  ) {}
-  
+    private storageService: StorageService,
+    private loadingService: LoadingService,
+    private activatedRoute: ActivatedRoute,
+    private overviewService: OverviewService,
+    private datePipe: DatePipe,
+    private router: Router,
+    public requestorSuggestService: RequestorSuggestService,
+    public emsUserSuggestService: EmsUserSuggestService,
+  ) {
+    this.unsubscribeAll = new Subject();
+
+    this.tableParams = {
+      pageSize: 0,
+      sortDirection: 'asc',
+      sortBy: 'ID',
+      filterForm: {},
+    };
+  }
+
+  ngOnInit(): void {    
+    this.userTerritory = this.authService.currentUser.tenants[0]?.description;
+
+    this.statusItem = this.activatedRoute.snapshot.data['status'] as Item[];
+    this.stageItem = this.activatedRoute.snapshot.data['stages'] as Item[];
+    this.ticketTypesItem = this.activatedRoute.snapshot.data['types'] as Item[];
+    this.tenantsItem = this.activatedRoute.snapshot.data['tenant'] as Item[];
+
+    const filterForm = JSON.parse(
+      this.storageService.getItem(this.TABLE_PARAMS_TOKEN)!
+    )?.filterForm;
+
+    this.searchForm = this.formBuilder.group({
+      tenantId: [filterForm?.tenantId || null],
+      prid: [filterForm?.prid || null],
+      partyName: [filterForm?.partyName || null],
+      ticketTypeIds: [filterForm?.ticketTypeIds || null],
+      stageIds: [filterForm?.stageIds || null],
+      statusIds: [filterForm?.statusIds || null],
+      requesterId: [filterForm?.requesterId || null],
+      assingmentUserId: [filterForm?.assingmentUserId || null],
+      ticketCode: [filterForm?.ticketCode || null],
+      salesforceAccountId: [filterForm?.salesforceAccountId || null]
+    });
+
+    this.requestorSuggestService.emitUpdateSignal();
+    this.emsUserSuggestService.emitUpdateSignal();
+
+    this.getTicketsOverview();
+  }
+
+  ngOnDestroy() {
+    this.unsubscribeAll.next();
+    this.unsubscribeAll.complete();
+  }
+
   ngAfterViewInit(): void {
-    this.loadingService.setSpinner(false, '', '');
-    this.activateFragmentNavigation();
-  }
+    this.loadData();
 
-  generateTicketForm(useHistoricalHeader = false): FormGroup {
-    // FORM BUILDING
-    const addressForm: Address = {
-      countryId: null,
-      stateId: null,
-      city: null,
-      postalCode: null,
-      addressLine1: null,
-      addressLine2: null,
-    };
-
-    return this.formBuilder.group({
-      header: this.formBuilder.group(
-        !useHistoricalHeader
-        ? {
-          ticketId: this.ticketId,
-          ticketCode: null,
-          salesforceAccountId: null,
-          requestor: null,
-          assignee: null,
-          clientType: [true, [Validators.required]],
-          stage: null,        
-        }
-      : new Header(),
-    ),
-      generalInformation: this.formBuilder.group({
-        prid: null, //[null, Validators.pattern(/⌃[0-9]+$/)],
-        entityTypeId: [null, [Validators.required]],
-        partyName: [null, [Validators.required]],
-        partyTypeId: [null, [Validators.required]],
-        organisationTypeId: null,
-        identifierTypeId: null,
-        identifierValue: null,
-        pwcSubindustryId: null,
-        email: [null, [Validators.email]],
-        economicGroupName: null,
-        economicGroupRelationshipPartnerId: null,
-        economicGroupRelationshipManagerId: null,
-        aliases: null,
-        supplementalInformationId: null,
-        stockExchangeId: null,
-        practiceSegmentId: null,
-        legacyPwcCode: null,
-        phoneNumber: null,
-        localRelationshipPartnerId: null,
-        localRelationshipManagerId: null,
-        regulatorId: null,
-        subclassificationId: null,
-        argentinaTributaryIdentifier: null,
-      }),
-      registeredAddress: this.formBuilder.group(addressForm),
-      operatingAddress: this.formBuilder.group(addressForm),
+    this.sort.sortChange.subscribe(() => (this.paginator.pageIndex = 0));
+    this.searchForm.valueChanges.subscribe({
+      next: () => {
+        this.paginator.pageIndex = 0
+        this.saveTableParams();
+      }
     });
+    
+    merge(this.sort.sortChange, this.paginator.page)
+      .pipe(
+        tap((_) => {
+          this.loadData();
+        })
+      )
+      .subscribe();
+
+    this.enableFormFilters();
   }
 
-  @ViewChild('historicalDataTabGroup', { static: false })
-  historicalDataTabGroup!: MatTabGroup;
-  selectedTabIndex: number = 0;
-  
-  activateFragmentNavigation() {
-    if (!this.historicalDataTabGroup) return;
-    this.activatedRoute.fragment.subscribe(fragment => {
-      fragment ??= Stage[this.createMode ? Stage.EntityCreation : Stage.EntityUpdate];
-      
-      const tabs = this.historicalDataTabGroup._tabs.toArray();
-      const fragmentTab = tabs.find(x => x.textLabel.replace(/ /gm, '') == fragment);
-      setTimeout(() => {
-      this.selectedTabIndex = tabs.indexOf(fragmentTab);
-      this.cdr.detectChanges(); // <-- fuerza la actualización
-       }, 500);
-    });
-  }
-
-
-  ngOnInit(): void {
-    this.loadingService.setSpinner(false, '', '');
-    
-    this.ticketForm = this.generateTicketForm();
-
-    this.loadSnapshotData();
-
-    this.linkSuggestServices();
-    this.setMode();
-
-    //revisamos si tiene EMS User asignado
-    this.hasEMSUser();
-
-    //revisamos si user no es requester
-    this.isNotRequester();
-
-    // this.ticketForm.valueChanges.subscribe(v => {
-    //   console.log('FULL FORM VALUE', v)
-    // })
-
-    this.buildHistoricalDataForm();    
-
-    this.applyContextValidators();
-
-    if ((!this.updateMode  || (this.createMode && !this.approveMode)) && !this.isVerificationTicket()) {
-      this.ticketForm.get(['generalInformation', 'prid']).disable();
-    }
-
-    if ((this.status == Status.CANCELED || this.status == Status.CLOSED) || 
-        (this.canSubmit() && this.status == Status.OPEN ) ||
-        (this.canApprove() && this.status == Status.PENDING)) {
-      this.ticketForm.disable({ emitEvent: false });
-      this.copyAddressEnabled = false;
-    }
-
-    if(this.validatePrid()){
-      this.ticketForm.get(['generalInformation', 'prid']).enable();
-      this.ticketForm.get(['generalInformation', 'prid']).markAsTouched();
-      this.ticketForm.get(['generalInformation', 'prid']).addValidators(Validators.required);
-    }
-
-    if (this.status == Status.CANCELED || this.status == Status.CLOSED) {
-      this.showCommentsAndAtth = false;
-    }
-
-    // ----------------------------
-    // Forms Events
-    // ----------------------------
-
-    // On clientType change
-    this.ticketForm
-      .get(['header', 'clientType'])
-      .valueChanges
-      .subscribe(() => this.applyContextValidators());
-    
-    // On registered address country change
-    this.ticketForm
-      .get(['registeredAddress', 'countryId'])
-      .valueChanges
-      .subscribe((countryId) => {
-        this.registeredStateSuggestService.countryId = countryId;
-        this.ticketForm.get(['registeredAddress', 'stateId']).reset();
-        setTimeout(() => {
-          this.ticketForm.get(['registeredAddress', 'stateId']).markAsTouched();  
-        }, 500);
-      });
-    
-    // On operating address country change
-    this.ticketForm
-      .get(['operatingAddress', 'countryId'])
-      .valueChanges
-      .subscribe((countryId) => {
-        this.operatingStateSuggestService.countryId = countryId;
-        this.ticketForm.get(['operatingAddress', 'stateId']).reset();
-        setTimeout(() => {
-          this.ticketForm.get(['operatingAddress', 'stateId']).markAsTouched();
-        }, 500);
-      });
-    
-    //On PRID change
-    const currentUrl = this.router.url;
-
-    if (currentUrl.includes('/ems/entity/update/verification'))
-    {
-        this.ticketForm.get(['generalInformation', 'prid']).valueChanges.pipe(
-        filter(() => !this.createMode && (this.ticketId <= 0)),
-        startWith(''),
-        distinctUntilChanged(),
-        // delay emits
-        debounceTime(1000),
-        switchMap(prid => {
-          if (prid !== '' && typeof prid == 'string') {
+  getTicketsOverview() {   
+    this.dataTable$
+      .pipe(
+        switchMap(() => {          
+          setTimeout(() => {
             this.loadingService.setSpinner(true);
-            return this.entityService.getByPrid(prid, this.ticketTypeId);
-          }
-          else return of(null);
-        }),
-        filter(entity => entity != null)
-      ).subscribe({
-        next: entity => {
-          if(entity?.generalInformation?.prid != '' && entity?.generalInformation?.prid != null){
-            this.patchEntityByPrid(entity);
-          }
-        }
+          }, 10);
+
+          this.searchFormBackUp = this.searchForm.value;
+          const filter = new GenericFilter().generate(
+            `${this.tableParams.sortBy} ${this.tableParams.sortDirection}`,
+            this.paginator,
+            this.searchFormBackUp
+          );
+
+          return this.overviewService.getTicketsOverview(filter);
+        })
+      )
+      .subscribe({
+        next: (response) => {
+          this.dataSource.data = response.results;
+          this.tableCountSubject.next(response.rowCount);
+          
+          this.searchForm.patchValue(this.searchFormBackUp, { emitEvent: false });
+          this.requestorSuggestService.emitUpdateSignal();
+          this.emsUserSuggestService.emitUpdateSignal();
+          
+          this.saveTableParams();
+        },
+      });
+  }
+
+  saveTableParams() {
+    // Save filters in Local Storage
+    this.tableParams.pageSize = this.paginator.pageSize;
+    this.tableParams.filterForm = this.searchForm.getRawValue();
+    this.storageService.setItem(
+      this.TABLE_PARAMS_TOKEN,
+      JSON.stringify(this.tableParams)
+    );
+  }
+
+  loadData() {
+    this.dataTable$.next([]);
+  }
+
+  clearFilters() {
+    this.searchForm.reset();
+    this.loadData();
+  }
+
+  applyFilters() {
+    this.loadData();
+  }
+
+  enableFormFilters() {
+    this.searchForm.valueChanges.subscribe({
+      next: (x) => {
+        this.tableParams.filterForm.requesterId = this.searchForm.get('requesterId').value;
+        this.tableParams.filterForm.assignedUsersId = this.searchForm.get('assignedUsersId').value;
+        this.storageService.setItem(
+          this.TABLE_PARAMS_TOKEN,
+          JSON.stringify(this.tableParams)
+        );
+        this.loadData();
+      },
+    });
+  }
+
+  setSortingOrder(sortDirection: SortDirection) {
+    this.tableParams.sortDirection = sortDirection;
+    this.loadData();
+  }
+
+  setSortingBy(sortBy: string) {
+    this.tableParams.sortBy = sortBy;
+    this.loadData();
+  }
+
+  setMatSorting(sort: Sort) {
+    
+    if (this.tableParams.sortBy !== sort.active) {
+      this.setSortingBy(sort.active);
+    }
+    
+    // if (this.tableParams.sortDirection !== sort.direction) {
+      console.log(sort.direction);
+      sort.direction = sort.direction || this.tableParams.sortDirection === 'asc'
+          ? 'desc'
+          : 'asc';
+      this.setSortingOrder(sort.direction);
+    // }
+  }
+
+  toggleFilter() {
+    this.isFilterOpen = !this.isFilterOpen;
+  }
+
+  openChnageRequestorDialog(item: TicketOverview | null): void {
+    if (item != null) {
+      this.ticketsId = [];
+      this.assignedUsersId = [];
+      this.ticketsId.push(item.id!);
+      this.assignedUsersId.push(item.assignedUserId);
+      this.changeRequestorRequest.push({
+        userId: item.assignedUserId,
+        ticketId: item.id!,
+        tenantId: item.tenantId,
+        userName: item.requesterUserEmail
       });
     }
-    
 
-    // On Ticket status change
-    this.status$.pipe(
-      filter(s => s == Status.OPEN && (this.createMode || this.updateMode))
-    ).subscribe(() => {
-      this.copyAddressEnabled = false;
-      this.ticketForm.disable({ emitEvent: false });
-    })
+    const dialogRef = this.dialog.open(ChangeRequestorDialogComponent, {
+      width: '600px',
+      position: { top: '10%' },
+      data: { userRequestor: this.changeRequestorRequest },
+    });
 
-    // No validation is performed in approve mode
-    this.status$.pipe(
-      filter(s => s == Status.OPEN && this.approveMode)
-    ).subscribe(() => {
-      this.clearEntityFormValidators()
-    })
-
-    // On any Registered form values changes
-    // Enabled address copy if there's a value
-    this.ticketForm.get('registeredAddress')
-      .valueChanges
-      .subscribe(() => {
-        this.checkCopyAddressEnable();
-      })
-
-    //console.log('create mode', this.createMode);
-    //console.log('update mode', this.updateMode);
-
-    // On Party Id change
-    this.ticketForm.get(['generalInformation', 'partyTypeId'])
-      .valueChanges
-      .subscribe(async (partyTypeId:number) => {
-        const emailControl = this.ticketForm.get(['generalInformation', 'email']);
-        const EXTERNAL_PERSON = 'External Person';
-
-        const item = this.selectItem
-          .generalInformation
-          .partyTypeId
-          .find(x => x.id == partyTypeId)
-
-        if (this.createMode && item.description == EXTERNAL_PERSON) {
-          emailControl.addValidators(Validators.required);
-        } else if (this.updateMode) {
-          emailControl.removeValidators(Validators.required);
-        } else {
-          emailControl.removeValidators(Validators.required);
-        }
-        
-        emailControl.updateValueAndValidity();
-
-        // Updates service partyType for filtering organization types
-        this.ticketForm.get(['generalInformation', 'organisationTypeId']).reset();
-        this.ticketForm.get(['generalInformation', 'organisationTypeId']).markAsTouched();
-        this.organizationTypeSuggestService.partyType = item.description;
-        this.selectItem.generalInformation.organisationTypeId = await lastValueFrom(this.organizationTypeSuggestService.getAllItems());
-      })
-
-
-    if ((this.updateMode && (this.status == Status.PENDING) && this.ticketForm.get(['header','ticketId']).value > 0)) {
-      this.ticketForm.get(['generalInformation', 'prid']).disable();
-    }
-
-    setTimeout(() => {
-      this.markFormAsTouched();
-    }, 1000);
-
-    //console.log(this.ticketForm);
-    //console.log('ticket status',this.status);
-  }
-
-  //prid solo acepta numeros
-  numbersOnly(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    let cleaned = input.value.replace(/\D+/g, '');
-    cleaned = cleaned.slice(0,9);
-    input.value = cleaned;
-    this.ticketForm.get(['generalInformation', 'prid']).setValue(cleaned, { emitEvent: false });
-  }
-
-  hasEMSUser(): boolean{
-    let check: boolean = false;
-    
-    const assigneeEmail = this.ticketForm.get(['header', 'assignee']).value;
-    const emsUserEmail = this.authService.currentUser.email;
-
-    if (assigneeEmail != null && assigneeEmail == emsUserEmail && this.canApprove() && this.status != Status.CANCELED && this.status != Status. CLOSED) {
-      check = true;
-    }
-
-    return check;
-  }
-
-  //si es ems user puede cancelar el ticket
-  isNotRequester(): boolean{
-    let check: boolean = false;
-    
-    const isNotReq = this.authService.currentUser.roles[0].id;
-
-    if (isNotReq != 1 && this.hasEMSUser())
-    {
-      this.approveMode = true;
-      check = true;
-    }
-
-    return check;
-  }
-
-  //nuevos dropdowns con autocomplete
-  
-  loadRegisteredCountries = () => {
-    return this.registeredCountrySuggestService.getSuggestByDescription(''); //getSuggestPaginated(description, page, pageSize);;
-  }
-
-  loadOperatingCountries = () => {
-    return this.operatingCountrySuggestService.getSuggestByDescription(''); //.getSuggestPaginated(description, page, pageSize);
-  }
-
-  loadRegisteredStates = () => {
-    const selectedCountry = this.ticketForm.get(['registeredAddress','countryId']).value;
-    if (!selectedCountry) return of ([]);
-
-    this.registeredStateSuggestService.countryId = selectedCountry.id;
-    return this.registeredStateSuggestService.getSuggestByDescription('');
-    //return this.registeredStateSuggestService.getSuggestPaginated('', page, pageSize, countryId);
-  }
-
-  loadOperatingStates = () => {
-    const selectedCountry = this.ticketForm.get(['operatingAddress','countryId']).value;
-    if (!selectedCountry) return of ([]);
-    
-    this.operatingStateSuggestService.countryId = selectedCountry.id;
-    return this.operatingStateSuggestService.getSuggestByDescription('');
-    //return this.registeredStateSuggestService.getSuggestPaginated('', page, pageSize, countryId);
-  }
-
-  loadSubIndustry = () => {
-    return this.subindustrySuggestService.getSuggestByDescription('');
-  };
-
-  loadStocks = () => {
-    return this.stockExchangeSuggestService.getSuggestByDescription('');
-  }
-
-  loadIdentifiers = () => {
-    return this.identifierTypeSuggestService.getSuggestPaginated('', 0, 1000);
-  }
-  
-  buildHistoricalDataForm() {
-    const ticketHistory = this.activatedRoute.snapshot.data['ticketHistory'] as Ticket[];
-
-    //console.log('ticket history', ticketHistory);
-
-    if (!Array.isArray(ticketHistory) || ticketHistory.length === 0) {
-      return;
-    }
-
-    for (const item of ticketHistory) {
-      const historicalTicketForm = this.generateTicketForm(true);
-
-      historicalTicketForm.get('header').patchValue(item.header, { emitEvent: false }); 
-      historicalTicketForm.get('generalInformation').patchValue(item.generalInformation, { emitEvent: false }); 
-      historicalTicketForm.get('operatingAddress').patchValue(item.operatingAddress, { emitEvent: false }); 
-      historicalTicketForm.get('registeredAddress').patchValue(item.registeredAddress, { emitEvent: false }); 
-
-      historicalTicketForm.disable({ emitEvent: false });
-
-      this.ticketFormHistory.push(historicalTicketForm);
-    }
-  }
-
-  private checkCopyAddressEnable() {
-    this.copyAddressEnabled = Object.values(this.ticketForm.get('registeredAddress').value)
-          .some(v => !!v);
-  }
-
-  patchEntity(entity: IEntity) {
-    if (!entity) return;
-
-    if (entity.meta?.outputEntityMessage) {
-      this.toastrService.warning(entity.meta.outputEntityMessage);
-      return;
-    }
-
-    this.registeredStateSuggestService.countryId = entity?.registeredAddress?.countryId;
-    this.operatingStateSuggestService.countryId = entity?.operatingAddress?.countryId;
-
-    this.ticketForm.get('generalInformation').patchValue(entity.generalInformation, { emitEvent: false }); 
-    this.ticketForm.get('operatingAddress').patchValue(entity.operatingAddress, { emitEvent: false }); 
-    this.ticketForm.get('registeredAddress').patchValue(entity.registeredAddress, { emitEvent: false }); 
-
-    this.restoreAutocompleteFields(entity);
-     
-
-    this.checkCopyAddressEnable();
-
-    this.updateSuggestControls();
-    //this.markFormAsTouched();
-
-    // Added some delay for 
-    // avoiding race condition
-    // setTimeout(() => {
-    //   this.loadingService.setSpinner(true);
-    // }, 100);
-  }
-
-  patchEntityByPrid(entity: IEntity) {
-    if (!entity) return;
-
-    if (entity.meta?.outputEntityMessage) {
-      this.dialogService.openPridDialog('', entity.meta.outputEntityMessage);
-      this.ticketForm.get(['generalInformation', 'prid']).reset();
-      //this.toastrService.warning(entity.meta.outputEntityMessage);
-
-      
-      return;
-    }
-
-    this.registeredStateSuggestService.countryId = entity?.registeredAddress?.countryId;
-    this.operatingStateSuggestService.countryId = entity?.operatingAddress?.countryId;
-
-    this.ticketForm.get('generalInformation').patchValue(entity.generalInformation, { emitEvent: false }); 
-    this.ticketForm.get('operatingAddress').patchValue(entity.operatingAddress, { emitEvent: false }); 
-    this.ticketForm.get('registeredAddress').patchValue(entity.registeredAddress, { emitEvent: false }); 
-     
-
-    this.checkCopyAddressEnable();
-
-    this.updateSuggestControls();
-    //this.markFormAsTouched();
-
-    // Added some delay for 
-    // avoiding race condition
-    // setTimeout(() => {
-    //   this.loadingService.setSpinner(true);
-    // }, 100);
- }
-
-  patchTicket(ticket: Ticket) {
-    
-    if (!ticket) return;
-    this.patchEntity(ticket);
-
-    this.ticketForm.get('header').patchValue(ticket.header, { emitEvent: false });
-    //this.ticketForm.get(['header', 'clientType']).patchValue(!!ticket.header.salesforceAccountId, { emitEvent: false });
-
-    this.ticketId = ticket.header.ticketId;
-    this.tenantId = ticket.header.tenantId;
-    this.status = ticket.header.status;
-    this.sourceDesc = ticket.header.sourceDesc;
-    this.ticketTypeDesc = ticket.header.ticketTypeDesc;
-    this.ticketStageDesc = ticket.header.ticketStageDesc;
-    this.ticketTypeId = ticket.header.ticketTypeId;
-  }
-
-  public markFormAsTouched(formGroup: FormGroup = this.ticketForm) {
-    (<any>Object).values(formGroup.controls).forEach((control: any) => {
-      if (control instanceof FormGroup) {
-        this.markFormAsTouched(control);
-      }
-      else {
-        control.markAsTouched();
-      }
+    dialogRef.afterClosed().subscribe((result) => {
+      this.ticketsId = [];
+      this.assignedUsersId = [];
+      this.requesterUsersId = [];
+      this.changeRequestorRequest = [];
+      this.userAssgmentRequest = [];
+      this.loadData();
     });
   }
 
-  isHistoricaModeAvailable(): boolean {
-    return [
-        TicketType.SalesforceOpportunity,
-        TicketType.EntityVerification,
-        TicketType.EntityCreationVerifcation
-      ].includes(this.ticketTypeId)
-  }
-
-  navigateToHistoricalData(event: MatTabChangeEvent) {
-    const stage = Stage[
-      event.tab.textLabel
-        .replace(/ /gm, '')
-        .replace('/', '') as keyof typeof Stage
-    ];
-    
-    let linkObj = null;
-    
-    switch (stage) {
-      case Stage.HierarchyCreationUpdate: linkObj = [AppRoute.HIERARCHY, this.ticketId]; break;          
-      case Stage.EntityCreation: 
-        // if (this.status == Status.OPEN) {
-        //   linkObj = [AppRoute.ENTITY, AppRoute.CREATE, AppRoute.APPROVE, this.ticketId];
-        // } else {
-          linkObj = [AppRoute.ENTITY, AppRoute.CREATE, this.ticketId]; 
-        //}
-        break;
-      case Stage.EntityVerification: linkObj = [AppRoute.VERIFICATION, this.ticketId]; break;
-      case Stage.EntityUpdate: 
-        if (this.status == Status.OPEN) {
-          linkObj = [AppRoute.ENTITY, AppRoute.UPDATE, AppRoute.APPROVE, this.ticketId];
-        } else {
-          linkObj = [AppRoute.ENTITY, AppRoute.UPDATE, this.ticketId]; 
-        }
-        break;
-        
-      default: linkObj = null; break;
+  openAssignmentDialog(item: TicketOverview | null): void {
+    if (item != null) {
+      this.ticketsId = [];
+      this.assignedUsersId = [];
+      this.ticketsId.push(item.id!);
+      this.assignedUsersId.push(item.assignedUserId);
+      this.userAssgmentRequest.push({
+        userId: item.assignedUserId,
+        ticketId: item.id!,
+        tenantId: item.tenantId,
+        userName: item.assignedUserEmail
+      });
     }
-    
-    linkObj.unshift(AppRoute.EMS);
-    linkObj.unshift(AppRoute.ROOT);
-    
-    this.router.navigate(linkObj, {
-      fragment: Stage[stage]
+
+    const dialogRef = this.dialog.open(AssignUserDialogComponent, {
+      width: '600px',
+      position: { top: '10%' },
+      data: { userAssing: this.userAssgmentRequest },
     });
-  } 
 
-  getHeaderFormGroup(): FormGroup {
-    return this.ticketForm.get('header') as FormGroup;
-  }
-
-  clearEntityFormValidators(form: FormGroup = this.ticketForm) {
-    (<any>Object).values(form.controls).forEach((control: any) => {
-      if (control instanceof FormGroup) {
-        this.clearEntityFormValidators(control);
-      }
-      else if (control !== this.ticketForm.get(['generalInformation', 'prid'])) {
-        (<FormControl>control).clearValidators();
-      }
+    dialogRef.afterClosed().subscribe((result) => {
+      this.ticketsId = [];
+      this.assignedUsersId = [];
+      this.requesterUsersId = [];
+      this.changeRequestorRequest = [];
+      this.userAssgmentRequest = [];
+      this.loadData();
     });
   }
 
-  applyContextValidators() {
-    if (this.status == Status.OPEN) {
-      this.clearEntityFormValidators();
-      return;      
+  itemSelectionChanged(selected: boolean, item: TicketOverview) {
+    var assignedUserId = item.assignedUserId;
+    var requesterUserId = item.requesterUserId;
+    
+    if (
+      selected &&
+      //!this.assignedUsersId.includes(assignedUserId) &&
+      //!this.requesterUsersId.includes(requesterUserId) &&
+      !this.ticketsId.includes(item.id)
+    ) {
+      //this.assignedUsersId.push(assignedUserId);
+      //this.requesterUsersId.push(requesterUserId);
+      this.ticketsId?.push(item.id!);
+      this.userAssgmentRequest.push({
+        userId: assignedUserId,
+        ticketId: item.id!,
+        tenantId: item.tenantId,
+        userName: item.assignedUserEmail
+      });
+      this.changeRequestorRequest.push({
+        userId: assignedUserId,
+        ticketId: item.id!,
+        tenantId: item.tenantId,
+        userName: item.requesterUserEmail
+      });
     }
-
-    for (const subform in this.ticketForm.controls) {
-      for (const controlKey in this.ticketForm.get(subform).value) {
-        const validators = this.getContextValidators(subform, controlKey);
-
-        if (validators != null) {
-          const control = this.ticketForm.get([`${subform}`, `${controlKey}`]);
-          control.clearValidators();          
-          control.addValidators(validators);
-          control.updateValueAndValidity({ emitEvent: false });
-        }
-      }
-    }
-  }
-
-  getContextValidators(subformKey: string, controlKey: string): ValidatorFn[] { 
-    const clientType = this.ticketForm.get(['header', 'clientType']).value as boolean;
-    const ticketType = <TicketType>this.ticketTypeId;
-
-    const validatorSwitch = (ignoreValue: boolean = false, requiredValue: boolean = true) => {
-      return !ignoreValue && clientType == requiredValue ?
-        [Validators.required] :
-        [];
-    };
-    
-    const requireValue = () => {
-      return (ticketType == TicketType.CreateEntity) || (ticketType == TicketType.EntityVerification) || (ticketType == TicketType.SalesforceOpportunity) || (ticketType == TicketType.EntityCreationVerifcation) ?
-        [Validators.required] :
-        [];
-    };
-
-    const valueIgnored = [TicketType.UpdateEntity].includes(ticketType);
-
-    const validators: any = {
-      generalInformation: {
-        prid: ((ticketType == TicketType.EntityVerification) || (ticketType == TicketType.UpdateEntity)) ? [Validators.required] : [],
-        organisationTypeId: requireValue(),
-        identifierTypeId: requireValue(),
-        identifierValue: requireValue(),
-        pwcSubindustryId: validatorSwitch(valueIgnored),
-      },
-      registeredAddress: {
-        countryId: requireValue(),
-        stateId: requireValue(),
-        city: requireValue(),
-        addressLine1: validatorSwitch(valueIgnored),
-      },
-      operatingAddress: {
-        countryId: validatorSwitch(valueIgnored),
-        stateId: validatorSwitch(valueIgnored),
-        city: validatorSwitch(valueIgnored),
-        addressLine1: validatorSwitch(valueIgnored),
-      }
-    }
-
-    if (!(subformKey in validators)) return null;
-    if (!((controlKey in validators[`${subformKey}`]))) return null;
-
-    return validators[`${subformKey}`][`${controlKey}`];
-  }
-
-  getTextControlInputType(subformName: string, controlName: string) {
-    const defaultType = 'text';
-    
-    return subformName == 'generalInformation' && controlName == 'email' ?
-      'email' :
-      defaultType;
-  }
-
-  getFormControlLabel(subformName: string, controlName: string): string {
-    var subformKey = subformName
-      .split(/(?=[A-Z])/)
-      .join('-')
-      .toUpperCase();
-    
-    var controlKey = controlName
-      .split(/(?=[A-Z])/)
-      .join('-')
-      .toUpperCase();
-    
-    if (subformKey.includes('ADDRESS')) subformKey = 'ADDRESS';
-    
-    return `EMS.ENTITY-EDITOR.${subformKey}.${controlKey}`;
-  }
-
-  getSubformTitle(controlName: string): string {
-    var key = controlName
-      .split(/(?=[A-Z])/)
-      .join('-')
-      .toUpperCase();
-        
-    return !key.includes('ADDRESS') ?
-      `EMS.ENTITY-EDITOR.${key}.TITLE` :
-      `EMS.ENTITY-EDITOR.ADDRESS.TYPE.${key}`;
-  }
-
-  getFormControlPlaceholder(subformName: string, controlName: string): string {
-    var subformKey = subformName
-      .split(/(?=[A-Z])/)
-      .join('-')
-      .toUpperCase();
-    
-    var controlKey = controlName
-      .split(/(?=[A-Z])/)
-      .join('-')
-      .toUpperCase();
-    
-    if (subformKey.includes('ADDRESS')) subformKey = 'ADDRESS';
-    
-    return `EMS.ENTITY-EDITOR.${subformKey}.PLACEHOLDER.${controlKey}`;
-  }
-  
-  preserveOriginalOrder = (a: KeyValue<string,AbstractControl<any, any>>, b: KeyValue<string,AbstractControl<any, any>>): number => {
-    return 0;
-  }
-
-  loadSnapshotData() {
-    this.ticketSourceId = this.activatedRoute.snapshot.data['entitySourceId'] as number;
-    this.ticketTypeId = this.activatedRoute.snapshot.data['ticketTypeId'] as number;
-    
-    const ticket = this.activatedRoute.snapshot.data['ticket'] as Ticket;
-
-    console.log("ticket", ticket);
-
-    if (!!ticket) this.patchTicket(ticket);
-    else this.ticketForm.get(['header', 'requestor']).patchValue(this.authService.currentUser.email);
-
-    // SELECT ITEMS
-    this.selectMultipleItem.generalInformation.entityTypeId = this.activatedRoute.snapshot.data['entityTypes'] as Item[] | [];
-    
-    this.selectItem.generalInformation.organisationTypeId = this.activatedRoute.snapshot.data['organisationTypeId'] as Item[] | [];
-    this.selectItem.generalInformation.partyTypeId = this.activatedRoute.snapshot.data['partyTypeId'] as Item[] | [];
-    this.selectItem.generalInformation.practiceSegmentId = this.activatedRoute.snapshot.data['practiceSegmentId'] as Item[] | [];
-    this.selectItem.generalInformation.regulatorId = this.activatedRoute.snapshot.data['regulatorId'] as Item[] | [];
-    this.selectItem.generalInformation.subclassificationId = this.activatedRoute.snapshot.data['subclassificationId'] as Item[] | [];
-  }
-
-  linkSuggestServices() {
-    this.suggestItem.generalInformation.identifierTypeId = this.identifierTypeSuggestService;
-    this.suggestItem.generalInformation.supplementalInformationId = this.supplementalInformationSuggestService;
-    this.suggestItem.generalInformation.stockExchangeId = this.stockExchangeSuggestService;
-    this.suggestItem.generalInformation.pwcSubindustryId = this.subindustrySuggestService;
-    this.suggestItem.generalInformation.economicGroupRelationshipManagerId = this.managerSuggestService;
-    this.suggestItem.generalInformation.economicGroupRelationshipPartnerId = this.partnerSuggestService;
-    this.suggestItem.generalInformation.localRelationshipPartnerId = this.partnerSuggestService;
-    this.suggestItem.generalInformation.localRelationshipManagerId = this.managerSuggestService;
-
-    this.suggestItem.registeredAddress.countryId = this.registeredCountrySuggestService;
-    this.suggestItem.registeredAddress.stateId = this.registeredStateSuggestService;
-    this.suggestItem.operatingAddress.countryId = this.operatingCountrySuggestService;
-    this.suggestItem.operatingAddress.stateId = this.operatingStateSuggestService;
-  }
-
-  getSuggestService(subformKey: string, controlKey: string): Observable<ISuggestService> {
-    const defaultType: ISuggestService = null;
-
-    if (!(subformKey in this.suggestItem)) return of(defaultType);
-    if (!((controlKey in (this.suggestItem as any)[`${subformKey}`]))) return of(defaultType); 
-    
-    return of((this.suggestItem as any)[`${subformKey}`][`${controlKey}`]);
-  }
-
-  setMode() {
-    this.updateMode = !!(this.activatedRoute.snapshot.data[
-      'updateMode'
-    ] as boolean);
-    this.detailMode = !!(this.activatedRoute.snapshot.data[
-      'detailMode'
-    ] as boolean);
-    this.createMode = !!(this.activatedRoute.snapshot.data[
-      'createMode'
-    ] as boolean);
-    this.approveMode = !!(this.activatedRoute.snapshot.data[
-      'approveMode'
-    ] as boolean);
-  }
-
-  getMultipleSelectItems(subformKey: string, controlKey: string): Observable<Item[]> {
-    const defaultType: Item[] = [{id: 0, description: 'NOT-IMPLEMENTED'}];
-
-    if (!(subformKey in this.selectMultipleItem)) return of(defaultType);
-    if (!((controlKey in (this.selectMultipleItem as any)[`${subformKey}`]))) return of(defaultType); 
-    
-    return of((this.selectMultipleItem as any)[`${subformKey}`][`${controlKey}`]);
-  }
-
-  getSelectItems(subformKey: string, controlKey: string): Observable<Item[]> {
-    const defaultType: Item[] = [{id: 0, description: 'NOT-IMPLEMENTED'}];
-
-    if (!(subformKey in this.selectItem)) return of(defaultType);
-    if (!((controlKey in (this.selectItem as any)[`${subformKey}`]))) return of(defaultType); 
-    
-    return of((this.selectItem as any)[`${subformKey}`][`${controlKey}`]);
-  }
-
-  getControlType(subformKey: string, controlKey: string): string {
-    const defaultType = 'text';
-
-    const controlTypes = [this.suggestItem, this.selectMultipleItem, this.selectItem];
-
-    for (const controlType of controlTypes) {
-      if (!(subformKey in controlType)) continue;
-      if (!((controlKey in (controlType as any)[`${subformKey}`]))) continue;
-      
-      return controlType.typeName;
-    }
-
-    return defaultType;
-  }
-
-  duplicateAddress(): void {
-    this.uniqueAddress = !this.uniqueAddress;
-
-    if (this.uniqueAddress) {
-      this.operatingStateSuggestService.countryId = this.ticketForm.get(['registeredAddress', 'countryId']).value;
-
-      this.ticketForm.get(['operatingAddress']).patchValue(
-        this.ticketForm.get(['registeredAddress']).value,
-        { emitEvent: false }
+    if (
+      !selected &&
+      //this.assignedUsersId.includes(assignedUserId) &&
+      //this.requesterUsersId.includes(requesterUserId) &&
+      this.ticketsId.includes(item.id!)
+    ) {
+      // this.assignedUsersId = this.assignedUsersId.filter(
+      //   (x) => x != assignedUserId
+      // );
+      // this.requesterUsersId = this.requesterUsersId.filter(
+      //   (x) => x != requesterUserId
+      // );
+      this.ticketsId = this.ticketsId?.filter((x) => x != item.id);
+      this.userAssgmentRequest = this.userAssgmentRequest.filter(
+        (x) => x.userId != assignedUserId && x.ticketId != item.id
       );
-      
-      this.operatingCountrySuggestService.emitUpdateSignal();
-      this.operatingStateSuggestService.emitUpdateSignal();
-    }
-    else {
-      this.ticketForm.get(['operatingAddress']).reset(null);
+      this.changeRequestorRequest = this.changeRequestorRequest.filter(
+        (x) => x.userId != requesterUserId && x.ticketId != item.id
+      );
     }
   }
 
-  private updateSuggestControls(): void {
-    this.identifierTypeSuggestService.emitUpdateSignal();
-    this.supplementalInformationSuggestService.emitUpdateSignal();
-    this.stockExchangeSuggestService.emitUpdateSignal();
-    this.subindustrySuggestService.emitUpdateSignal();
-    this.managerSuggestService.emitUpdateSignal();
-    this.partnerSuggestService.emitUpdateSignal();
-    this.localManagerSuggestService.emitUpdateSignal();
-    this.localPartnerSuggestService.emitUpdateSignal();
-
-    this.updateAddressSuggestControls();
-  }
-
-  private updateAddressSuggestControls(): void {
-    this.registeredCountrySuggestService.emitUpdateSignal();
-    this.registeredStateSuggestService.emitUpdateSignal();
-    this.operatingCountrySuggestService.emitUpdateSignal();
-    this.operatingStateSuggestService.emitUpdateSignal();
-  }
-
-  isVerificationTicket() {
-    return (<TicketType>this.ticketTypeId == TicketType.EntityVerification) ||
-            this.ticketTypeDesc == 'Entity Verification';    
-  }
-
-  isUpdateTicket() {
-    return (<TicketType>this.ticketTypeId == TicketType.UpdateEntity || 
-            (this.ticketStageDesc == 'Entity Update' && <TicketType>this.ticketTypeId == TicketType.SalesforceOpportunity) );
-  }
-
-  isCreationTicket() {
-    return <TicketType>this.ticketTypeId == TicketType.CreateEntity;
-  }
-
-  isCreationVerificationTicket() {
-    return <TicketType>this.ticketTypeId == TicketType.EntityCreationVerifcation;
-  }
-
-
-  // -----------------
-  // ACTIONS
-  // -----------------
-
-  showTicketHistory() {
-    if (this.ticketId == null) return;
-    this.dialogService.openTicketHistoryDialog(this.ticketId);
-  }
-
-  close() {
-    this.loadingService.setSpinner(true);
-    this.router.navigate(['/', this.ticketId ? AppRoute.OVERVIEW : AppRoute.DASHBOARD]);
-  }
-
-  async cancel() {
-    const confirm = await lastValueFrom(
-      this.dialogService.openConfirmDialog(this.translate.instant('TOASTR.CANCELATION-MESSAGE'), '').afterClosed()
-    );
-    if (!confirm) return;
-
-    this.loadingService.setSpinner(true);
-    const result = await lastValueFrom(
-      this.ticketService.cancel(this.ticketId)
-    );
-
-    this.router.navigate(['/', AppRoute.OVERVIEW]);
-  }
-
-  //nuevo cancel con comentario
-  async newCancel()
-  {
-    //let ticket = this.getTicketFromForm();
-
-    this.ticketForm.updateValueAndValidity();
-    // if (this.ticketForm.invalid) {
-    //   this.toastrService.error(this.translate.instant('TOASTR.ENTITY-ERROR'))
-    //   return;
-    // }
-    
-    const dialogData = await lastValueFrom(
-      this.dialogService.openCancelDialog(this.translate.instant('TOASTR.CANCELATION-MESSAGE'), '').afterClosed() 
-    );
-    if (!dialogData.cancelled) return;
-    
-    this.loadingService.setSpinner(true);
-    const result = await lastValueFrom(
-      this.ticketService.newCancel(this.ticketId, dialogData.cancelMessage)
-    );
-
-    this.router.navigate(['/', AppRoute.OVERVIEW]);
-  }
-
-  private getTicketFromForm(): Ticket {
-    this.updateAutocompleteValues();
-    
-    let ticket = Object.assign(
-      new Ticket(),
-      this.ticketForm.getRawValue()
-    ) as Ticket;
-
-    ticket.header.sourceId = this.ticketSourceId;
-    ticket.header.ticketTypeId = this.ticketTypeId;
-    ticket.header.sourceDesc = this.sourceDesc;
-    ticket.header.ticketTypeDesc = this.ticketTypeDesc;
-    ticket.header.fileIds = this.attachmentFileIds;
-    ticket.header.commentIds = this.commentIds;
-
-    return ticket;
-  }
-
-  updateAutocompleteValues() {
-        const registeredCountry = this.ticketForm.get(['registeredAddress','countryId'])?.value;
-    if (registeredCountry != null) {
-      const registeredCountryId = registeredCountry.id;
-      this.ticketForm.get(['registeredAddress','countryId']).setValue(registeredCountryId, { emitEvent: false });
-    }
-    
-    const registeredState = this.ticketForm.get(['registeredAddress','stateId'])?.value;
-    if (registeredState != null) {
-      const registeredStateId = registeredState.id;
-      this.ticketForm.get(['registeredAddress','stateId']).setValue(registeredStateId, { emitEvent: false });
-    }
-    
-    const operatingCountry = this.ticketForm.get(['operatingAddress','countryId'])?.value;
-    if (registeredState != null) {
-      const operatingCountryId = operatingCountry.id;
-      this.ticketForm.get(['operatingAddress','countryId']).setValue(operatingCountryId, { emitEvent: false });
-    }
-
-    const operatingState = this.ticketForm.get(['operatingAddress','stateId'])?.value;
-    if (operatingState != null) {
-      const operatingStateId = operatingState.id;
-      this.ticketForm.get(['operatingAddress','stateId']).setValue(operatingStateId);
-    }
-
-    const identifierType = this.ticketForm.get(['generalInformation','identifierTypeId'])?.value;
-    if (identifierType != null)
-    {
-      const identifierTypeId = identifierType.id;
-      this.ticketForm.get(['generalInformation','identifierTypeId']).setValue(identifierTypeId, { emitEvent: false });
-    }
-    
-    const stockExchange = this.ticketForm.get(['generalInformation','stockExchangeId'])?.value;
-    if (stockExchange != null) {
-      const stockExchangeId = stockExchange.id;
-      this.ticketForm.get(['generalInformation','stockExchangeId']).setValue(stockExchangeId, { emitEvent: false });
-    }
-    
-    const subIndustry = this.ticketForm.get(['generalInformation','pwcSubindustryId'])?.value;
-    if (subIndustry != null) {
-      const subIndustryId = subIndustry.id;
-    this.ticketForm.get(['generalInformation','pwcSubindustryId']).setValue(subIndustryId, { emitEvent: false });
-    }
-  }
-
-  updateAttachmentFileIds(fileIds: number[]) {
-    this.attachmentFileIds = fileIds;
-  }
-
-  updateCommentIds(commentsIds: number[]) {
-    this.commentIds = commentsIds;
-  }
-
-  async submit() {
-    let ticket = this.getTicketFromForm();
-
-    this.ticketForm.updateValueAndValidity({ emitEvent: false });
-    if (this.ticketForm.invalid) {
-      this.toastrService.error(this.translate.instant('TOASTR.ENTITY-ERROR'))
-      return;
-    }
-    
-    const confirm = await lastValueFrom(
-      this.dialogService.openConfirmDialog(this.translate.instant('TOASTR.CONFIRMATION-MESSAGE'), '').afterClosed()
-    );
-    if (!confirm) return;
-
-    this.updateAutocompleteValues();
-
-    this.loadingService.setSpinner(true);
-    const result = await lastValueFrom(
-      this.ticketService.submit(ticket)
-    );
-
-    this.router.navigate(['/', AppRoute.OVERVIEW]);    
-    this.ticketId = result.header.ticketId;
-    this.status = result.header.status;
-
-    //this.ticketForm.get('header').patchValue(result.header, { emitEvent: false });
-    
-  }
-
-  async accept() {
-    let ticket = this.getTicketFromForm();
-
-    this.ticketForm.updateValueAndValidity();
-    if (this.ticketForm.invalid) {
-      this.toastrService.error(this.translate.instant('TOASTR.ENTITY-ERROR'))
-      return;
-    }
-
-    const confirm = await lastValueFrom(
-      this.dialogService.openConfirmDialog(this.translate.instant('TOASTR.APPROVAL-MESSAGE'), '').afterClosed()
-    );
-    if (!confirm) return;
-   
-    const sourceDesc = (ticket?.header?.sourceDesc == 'EMS Tool' && (ticket.header.ticketTypeDesc != 'Entity Verification') && (ticket.header.ticketTypeDesc != 'Entity Creation & Verification') )
-     ? 'EMS Tool' : 'Automatico';
-
-
-    this.loadingService.setSpinner(true);
-    var result = await lastValueFrom(
-      this.ticketService.accept(ticket, sourceDesc)
-    );
-
-    if ((result.generalInformation.reason)) {
-      this.toastrService.warning(result.generalInformation.reason);
-    } else {
-      this.router.navigate(['/', AppRoute.OVERVIEW]);
-    }
-
-    //this.router.navigate(['/', this.ticketId ? AppRoute.OVERVIEW : AppRoute.DASHBOARD]);
-  }
-
-  async reject() {
-    let ticket = this.getTicketFromForm();
-
-    this.ticketForm.updateValueAndValidity();
-    // if (this.ticketForm.invalid) {
-    //   this.toastrService.error(this.translate.instant('TOASTR.ENTITY-ERROR'))
-    //   return;
-    // }
-    
-    const dialogData = await lastValueFrom(
-      this.dialogService.openRejectDialog(this.translate.instant('TOASTR.REJECT-MESSAGE'), '').afterClosed()
-    );
-    if (!dialogData.rejected) return;
-    
-    this.loadingService.setSpinner(true);
-    const result = await lastValueFrom(
-      this.ticketService.reject(ticket, dialogData.rejectionMessage)
-    );
-
-    this.router.navigate(['/', AppRoute.OVERVIEW]);
-  }
-
-  canApprove(): boolean {
-    const permissions = [Permission.UpdateEntityApproval, Permission.CreateEntityApproval];
-    return this.authService.isAuthorized(permissions);
-  }  
-
-  canSubmit(): boolean {
-    const permission = this.createMode ? Permission.CreateEntityEdit :
-      this.updateMode ? Permission.UpdateEntityEdit :
-        null;
-    const userTenantId = this.authService.currentUser.tenantId;
-    
-
-    return this.authService.isAuthorized(permission)
-      //&& ((userTenantId == this.tenantId) || this.ticketId <= 0 || this.ticketId == null);
-  }
-  
-  canSubmitEMSTeamMember(): boolean {
-    const isRequester = this.authService.currentUser.roles.some(
-      (role) => role.description == Role.Requestor,
-    );
-    const isImplementerHierachy = this.authService.currentUser.roles.some(
-      (role) => role.description == Role.Implementer_Hierarchy,
-    );
-    const isIndependenceSpecialist = this.authService.currentUser.roles.some(
-      (role) => role.description == Role.Independence_Specialist,
-    );
-
+  isItemSelected(item: TicketOverview): boolean {
     return (
-      isRequester &&
-      (isImplementerHierachy || isIndependenceSpecialist) &&
-      (this.authService.currentUser.tenantId == 1 ||
-        this.authService.currentUser.tenantId == 4)
-    ); //Solo aplica para ARG o VEN
+      //this.assignedUsersId.some((x) => x == item.assignedUserId) &&
+      //this.requesterUsersId.some((x) => x == item.requesterUserId)
+      this.ticketsId.some((x) => x == item.id)
+    );
   }
 
-  private restoreAutocompleteFields(entiy: IEntity): void {
-    //registered country
-    //const registeredCountryId = this.ticketForm.get(['registeredAddress', 'countryId']).value;
-   if (
-        entiy.registeredAddress &&
-        Object.values(entiy.registeredAddress).some(v => v !== null && v !== undefined && v !== '')
-      ) {
-      const registeredCountryId = entiy.registeredAddress.countryId;
-      if (registeredCountryId) {
-        this.registeredCountrySuggestService.getSuggestPaginated(registeredCountryId.toString(), 0, 1)
-        .subscribe(items => {
-          const found = items.find(x =>x.id === registeredCountryId);
-          if (found) {
-            this.ticketForm.get(['registeredAddress', 'countryId']).setValue(found, { emitEvent: false });
-          }
-        })
-      }
+  setAllItemsChecked(checked: boolean) {
+    this.assignedUsersId = [];
+    this.requesterUsersId = [];
+    this.ticketsId = [];
+    this.changeRequestorRequest = [];
+    this.userAssgmentRequest = [];
 
-      //registered state
-      const registeredStateId = this.ticketForm.get(['registeredAddress', 'stateId']).value;
-      if (registeredStateId) {
-        this.registeredStateSuggestService.getSuggestPaginated(registeredStateId.toString(), 0, 1, registeredCountryId)
-        .subscribe(items => {
-          const found = items.find(x =>x.id === registeredStateId);
-          if (found) {
-            this.ticketForm.get(['registeredAddress', 'stateId']).setValue(found, { emitEvent: false });
-          }
-        })
-      }
-    }
-
-  if (
-        entiy.operatingAddress &&
-        Object.values(entiy.operatingAddress).some(v => v !== null && v !== undefined && v !== '')
-      ) {
-      //operating country
-      const operatingCountryId = this.ticketForm.get(['operatingAddress', 'countryId']).value;
-      if (operatingCountryId) {
-        this.operatingCountrySuggestService.getSuggestPaginated(operatingCountryId.toString(), 0, 1)
-        .subscribe(items => {
-          const found = items.find(x =>x.id === operatingCountryId);
-          if (found) {
-            this.ticketForm.get(['operatingAddress', 'countryId']).setValue(found, { emitEvent: false });
-          }
-        })
-      }
-
-      //operating state
-      const operatingStateId = this.ticketForm.get(['operatingAddress', 'stateId']).value;
-      if (operatingStateId) {
-        this.operatingStateSuggestService.getSuggestPaginated(operatingStateId.toString(), 0, 1, operatingCountryId)
-        .subscribe(items => {
-          const found = items.find(x =>x.id === operatingStateId);
-          if (found) {
-            this.ticketForm.get(['operatingAddress', 'stateId']).setValue(found, { emitEvent: false });
-          }
-        })
-      }
-    }
-
-    //identifier
-    const identifierId = this.ticketForm.get(['generalInformation','identifierTypeId']).value;
-    if (identifierId) {
-      this.identifierTypeSuggestService.getSuggestPaginated(identifierId.toString(), 0, 1)
-      .subscribe(items => {
-        const found = items.find(x =>x.id === identifierId);
-        if (found) {
-          this.ticketForm.get(['generalInformation','identifierTypeId']).setValue(found, { emitEvent: false });
-        }
-      })
-    }
-
-    //subindustry
-    const subindustryId = this.ticketForm.get(['generalInformation','pwcSubindustryId']).value;
-    if (subindustryId) {
-      this.subindustrySuggestService.getSuggestPaginated(subindustryId.toString(), 0, 1)
-      .subscribe(items => {
-        const found = items.find(x =>x.id === subindustryId);
-        if (found) {
-          this.ticketForm.get(['generalInformation','pwcSubindustryId']).setValue(found, { emitEvent: false });
-        }
-      })
+    if (checked) {
+      this.assignedUsersId = this.dataSource.data.map((x) => x.assignedUserId);
+      this.requesterUsersId = this.dataSource.data.map(
+        (x) => x.requesterUserId
+      );
+      this.ticketsId = this.dataSource.data.map((x) => x.id!);
+      this.changeRequestorRequest = this.dataSource.data.map((x) => ({
+        userId: x.assignedUserId,
+        ticketId: x.id!,
+        tenantId: x.tenantId,
+        userName: ''
+      }));
+      this.userAssgmentRequest = this.dataSource.data.map((x) => ({
+        userId: x.requesterUserId,
+        ticketId: x.id!,
+        tenantId: x.tenantId,
+        userName: ''
+      }));
+    } else {
+      this.assignedUsersId = [];
+      this.requesterUsersId = [];
+      this.ticketsId = [];
+      this.changeRequestorRequest = [];
+      this.userAssgmentRequest = [];
     }
   }
 
-  validatePrid(){
-    return (this.canApprove() && this.status == Status.OPEN && this.ticketStageDesc == 'Entity Creation')
+  allItemsChecked(): boolean {
+    const dataSourceIds = this.dataSource.data.map((x) => x.assignedUserId);
+    const commonIds = this.assignedUsersId.filter((x) =>
+      dataSourceIds.includes(x)
+    );
+    // console.log(commonIds.length >= this.dataSource.data.length &&
+    //   this.dataSource.data.length > 0)
+    // Check length of the intersection
+    return (
+      commonIds.length >= this.dataSource.data.length &&
+      this.dataSource.data.length > 0
+    );
   }
 
-  isvalid(){
-    console.log(this.ticketForm.get(['generalInformation', 'prid']));
+  someItemsChecked(): boolean {
+    const dataSourceIds = this.dataSource.data.map((x) => x.assignedUserId);
+    const commonIds = this.assignedUsersId.filter((x) =>
+      dataSourceIds.includes(x)
+    );
+    return (
+      0 < commonIds.length && commonIds.length < this.dataSource.data.length
+    );
+  }
+
+  enableUserAssignmentButtos(): boolean {
+    if (this.ticketsId != undefined && this.ticketsId.length > 0) return false;
+    else return true;
+  }
+
+  enableTableButtons(): boolean {
+    if (this.ticketsId.length <= 0) return false;
+    else return true;
+  }
+
+  getItemValue(item: TicketOverview, key: string): string {
+    const formatter: any = {
+      CREATIONDATE: (d: Date) => this.datePipe.transform(d,'d-MMM-y', null, 'es-AR'),
+      MODIFICATIONDATE: (d: Date) => this.datePipe.transform(d,'d-MMM-y', null, 'es-AR'),
+    
+      //formateo de reason
+      REASON: (value: string) => {
+        if (!value) return '';
+        const prefix = value.split(' ')[0];
+        return `Ticket ${prefix}`
+      }
+    };
+
+
+    const searchedKey = Object.keys(item).find(
+      (x) => x.toLowerCase() === key.toLowerCase()
+    );
+    const searchedValue = (item as any)[searchedKey];
+
+    return key in formatter ? formatter[key](searchedValue) : searchedValue
+  }
+
+  getFormByStaus(item: TicketOverview) {
+    if (item.ticketStage == 'Entity Creation') {
+      if (item.ticketStatus == 'Open') {
+        this.router.navigate([`ems/entity/create/approve`, item.id]);
+      } else {
+        this.router.navigate([`ems/entity/create`, item.id]);
+      }
+    }
+    if (item.ticketStage == 'Entity Update') {
+      if (item.ticketStatus == 'Open') {
+        this.router.navigate([`ems/entity/update/approve`, item.id]);
+      } else {
+        this.router.navigate([`ems/entity/update`, item.id]);
+      }
+    }
+    if (item.ticketStage == 'Hierarchy Creation/Update') {
+      if (item.ticketStatus == 'Open') {
+        this.router.navigate([`ems/hierarchy/approve`, item.id]);
+      } else {
+        this.router.navigate([`ems/hierarchy/`, item.id]);
+      }
+    }
+    if (item.ticketStage == 'Entity Verification') {
+        this.router.navigate([`ems/verification/`, item.id]);
+    }
+  }
+
+  canAssign(){
+    const permissions = [Permission.HierarchyApproval,Permission.CreateEntityApproval,Permission.UpdateEntityApproval,Permission.VerificationApproval];
+    return this.authService.isAuthorized(permissions);
   }
 }
