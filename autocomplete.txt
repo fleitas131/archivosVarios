@@ -511,3 +511,145 @@ export class OverviewComponent implements OnInit, OnDestroy {
     return this.authService.isAuthorized(permissions);
   }
 }
+
+
+///
+BE
+
+public async Task<PagedResult<TicketDTO>> GetOverview(InputOverviewParams inputParams)
+{
+    bool isRequesterRole = false;
+    bool isAdmin = false;
+
+    var predicate = PredicateBuilder.False<Ticket>();
+
+    var userAuth = await _userService.GetUserAsync();
+    //var userAuth = AuxUser(); 
+    var userTenants = userAuth.Tenants.Select(x => x.Id);
+    isRequesterRole = userAuth.Roles.Any(x => x.Name.ToLower() == "requestor");
+
+    isAdmin = userAuth.IsAdmin;
+
+    IList<Expression<Func<Ticket, bool>>> lstExpr = new List<Expression<Func<Ticket, bool>>>();
+    Expression<Func<Ticket, bool>> expression1;
+    Expression<Func<Ticket, bool>> expression2;
+    Expression<Func<Ticket, bool>> expression3 = x => x.TicketTypeId > 0;
+    Expression<Func<Ticket, bool>> expression4 = x => x.StageId > 0;
+    Expression<Func<Ticket, bool>> expression5 = x => x.StatusId > 0;
+    Expression<Func<Ticket, bool>> expression6 = x => x.Id > 0;
+    Expression<Func<Ticket, bool>> expression7 = x => x.Id > 0;
+    Expression<Func<Ticket, bool>> expression8 = x => x.Id > 0;
+    Expression<Func<Ticket, bool>> expression9 = x => x.Id > 0;
+    Expression<Func<Ticket, bool>> expression10 = x => x.Id > 0;
+    Expression<Func<Ticket, bool>> expression11 = x => x.Id > 0;
+    Expression<Func<Ticket, bool>> expression12 = x => x.Id > 0;
+
+    if (!string.IsNullOrWhiteSpace(inputParams.Prid))
+    {
+        expression1 = x => x.Entity.Prid.Trim().ToUpper() == inputParams.Prid.Trim().ToUpper();
+        lstExpr.Add(expression1);
+    }
+    if (!string.IsNullOrWhiteSpace(inputParams.PartyName))
+    {
+        expression2 = x => x.Entity.PartyName.Trim().ToUpper().Contains(inputParams.PartyName.Trim().ToUpper());
+        lstExpr.Add(expression2);
+    } 
+
+    //TicketCode y SalesForce Account Id
+    if (inputParams.SalesforceAccountId?.Length > 0)
+        expression12 = x => inputParams.SalesforceAccountId.Contains(x.SalesforceAccount.SalesforceAccountId);
+        lstExpr.Add(expression12);
+    if (inputParams.TicketCode?.Length > 0)
+        expression11 = x => inputParams.TicketCode.Contains(x.TicketCode);
+        lstExpr.Add(expression11);
+    if (inputParams.TicketTypeIds?.Length > 0)
+        expression3 = x => inputParams.TicketTypeIds.Contains(x.TicketTypeId);
+        lstExpr.Add(expression3);
+    if (inputParams.StageIds?.Length > 0)
+        expression4 = x => inputParams.StageIds.Contains(x.StageId);
+        lstExpr.Add(expression4);
+    if (inputParams.StatusIds?.Length > 0)
+        expression10 = x => inputParams.StatusIds.Contains(x.StatusId);
+        lstExpr.Add(expression10);
+    if (inputParams.AssingmentUserId != null && inputParams.AssingmentUserId > 0)
+        expression6 = x => x.AssignedUserId == inputParams.AssingmentUserId;
+        lstExpr.Add(expression6);
+    if (inputParams.RequesterId != null)
+        expression7 = x => x.RequesterUserId == inputParams.RequesterId;
+        lstExpr.Add(expression7);
+    if (inputParams.TenantId != null)
+        expression8 = x => x.TenantId == inputParams.TenantId;
+        lstExpr.Add(expression8);
+
+    if (isRequesterRole)
+    {
+        expression5 = x => x.RequesterUserId == userAuth.Id;
+        lstExpr.Add(expression5);
+    }
+    else
+    {
+        expression9 = x => userTenants.Contains(x.TenantId);
+        lstExpr.Add(expression9);
+    }
+
+    var includes = new string[] { "Tenant", "Entity", "TicketType", "Stage", "Status", "RequesterUser", "AssignedUser" };
+
+    var orderBy = inputParams.SortBy.Split();
+    inputParams.SortBy = orderBy[0].ToUpper();
+    inputParams.SortDirection = orderBy[1].ToUpper();
+    SortDirection sortDirection = orderBy[1].ToUpper() == "DESC" ? SortDirection.OrderByDescending : SortDirection.OrderByAscending;
+
+    Expression<Func<Ticket, string>> sortExpression;
+
+    switch (inputParams.SortBy.ToUpper())
+    {
+        case "CREATIONDATE":
+            sortExpression = s => s.CreationDate.ToString();
+            break;
+        case "REQUESTERLOS":
+            sortExpression = s => s.RequesterUser.LoS;
+            break;
+        case "REQUESTERUSEREMAIL":
+            sortExpression = s => s.RequesterUser.Email;
+            break;
+        case "ASSIGNEDUSEREMAIL":
+            sortExpression = s => s.AssignedUser.Email;
+            break;
+        case "PARTYREFERENCEID":
+            sortExpression = s => s.Entity.Prid;
+            break;
+        case "PARTYNAME":
+            sortExpression = s => s.Entity.PartyName;
+            break;
+        case "TICKETTYPENAME":
+            sortExpression = s => s.TicketType.Description;
+            break;
+        case "TICKETSTAGE":
+            sortExpression = s => s.Stage.Description;
+            break;
+        case "TICKETSTATUS":
+            sortExpression = s => s.Status.Description;
+            break;
+        case "TICKETCODE":
+            sortExpression = s => s.TicketCode;
+            break;
+        case "MODIFICATIONDATE":
+            sortExpression = s => s.TicketCode;
+            break;
+        case "REASON":
+            sortExpression = s => s.TicketCode;
+            break;
+        default:
+            sortExpression = s => s.TicketCode;
+            break;
+    }
+
+    var ret = await _unitOfWork.Ticket.GetPagedAllAsNoTrackWithRelations<Ticket>(inputParams.Page, inputParams.PageSize, includes, sortDirection, sortExpression, lstExpr.ToArray());
+
+    var retDTO = _mapper.Map<IEnumerable<TicketDTO>>(ret.Results);
+
+    PagedResult<TicketDTO> retPagedResult = new PagedResult<TicketDTO>
+       (ret.CurrentPage, ret.PageCount, ret.PageSize, ret.RowCount, retDTO);
+
+    return retPagedResult;
+}
