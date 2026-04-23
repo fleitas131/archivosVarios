@@ -653,3 +653,44 @@ public async Task<PagedResult<TicketDTO>> GetOverview(InputOverviewParams inputP
 
     return retPagedResult;
 }
+
+//////
+NEW
+
+ public async Task<PagedResult<SupportContactsDTO>> GetSupportContactsAsync(SearchPaginationForm parameters)
+ {
+     string[] includes = { "UserRoles.Role", "UserRoles.User", "UserRoles" };
+     var implementerRoles = new List<string>() { "Implementer Entity", "Implementer Hierarchy", "Independence Specialist", "EMS Country Administrator" };
+     var orderBy = parameters.SortExpression?.Split();
+     SortDirection sortDirection = SortDirection.OrderByAscending;
+
+     var user = await _userService.GetUserAsync();
+
+     orderBy[0] = orderBy[0] == "TITLE" ? "CATEGORYNAME" : orderBy[0];
+
+     var userEntity = orderBy != null ?
+         typeof(User).GetProperties().FirstOrDefault(x => x.Name.ToUpper().Contains(orderBy[0].ToUpper())) :
+         typeof(User).GetProperties().FirstOrDefault(x => x.Name.ToUpper().Contains("FULLNAME"));
+
+     var supportContactsTable = await _unitOfWork.User.GetPaged<object, SupportContactsDTO>(
+         parameters.Page,
+         parameters.PageSize,
+         includes,
+         sortDirection,
+         z => EF.Property<object>(z, userEntity.Name),
+         a => new()
+         {
+             Id = a.Id,
+             FullName = a.FullName,
+             Email = a.Email,
+             Initials = a.Initials,
+             Roles = a.UserRoles.Where(r => r.TenantId == user.TenantId).Select(r => new ItemDropDownListDTO { Id = r.Role.Id, Description = r.Role.Name }).ToList(),
+             Title = a.CategoryName,
+         },
+         x => x.UserRoles.Any(x => implementerRoles.Contains(x.Role.Name)),
+         x => x.UserRoles.Any(x => x.TenantId == user.TenantId),
+         x => x.DeletionDate == null
+     );
+
+     return supportContactsTable;
+ }
