@@ -1,33 +1,260 @@
-/****** Object:  View [EMS].[vTicketInfo]    Script Date: 8/5/2026 17:18:43 ******/
-SET ANSI_NULLS ON
-GO
+public async Task<List<FactReconciliation>> CheckFactReconFile(List<FileWarning> warnings, string file, Territory territory, long zipId, long textId)
+{
+    var factsRecons = new List<FactReconciliation>();
+    int frcRequired = 11;
+    bool frcCheck = false;
 
-SET QUOTED_IDENTIFIER ON
-GO
+    var fieldNames = new List<string>();
+    foreach (PropertyInfo p in typeof(FactReconciliation).GetProperties())
+    {
+        string propertyName = p.Name;
+        fieldNames.Add(propertyName);
+    }
 
-ALTER VIEW [EMS].[vTicketInfo] AS
-SELECT
-    t.CreationDate,
-    t.ModificationDate,
-    t.TicketCode,
-    ent.Prid,
-    sa.SalesforceAccountId,
-    sa.PartyId,
-    ent.PartyName,
-    tt.Description AS TicketType,
-    req.Email AS RequestedBy,
-    req.LoS AS LOS,
-    asg.Email AS AssignedTo,
-    stg.Description AS TicketStage,
-    s.Description AS TicketStatus,
-    tenant.CountryISOName AS Tenant
-FROM ems.Ticket t
-JOIN App.Tenant tenant ON t.TenantId = tenant.Id
-JOIN ems.tickettype tt ON t.tickettypeid = tt.id
-JOIN ems.Status s ON t.StatusId = s.Id
-JOIN ems.Stage stg ON t.StageId = stg.Id
-JOIN ems.Entity ent ON t.EntityId = ent.Id
-JOIN ems.[user] req ON req.Id = t.RequesterUserId
-LEFT JOIN ems.SalesforceAccount sa ON t.SalesforceAccountId = sa.Id
-LEFT JOIN ems.[user] asg ON asg.Id = t.AssignedUserId;
-GO
+    using (StreamReader reader = new StreamReader(file))
+    {
+        while (!reader.EndOfStream)
+        {
+            string testLine = await reader.ReadLineAsync();
+            string[] test = testLine.Split('~');
+
+            if (test.Length < frcRequired)
+            {
+                //error cantidad de datos o splitting: se cambia de error a warning
+                var warning = new FileWarning();
+                warning.TerritoryId = territory.Id;
+                warning.TerritoryZipFileId = zipId;
+                warning.TerritoryTextFileId = textId;
+                warning.WarningMessage = "Faltan datos o el caracter de splitting es incorrecto: " + Path.GetFileName(file);
+                warning.FileRow = testLine;
+                warning.WarningDate = DateTime.Now;
+
+                warnings.Add(warning);
+            }
+
+            var factRecon = new FactReconciliation();
+            factRecon.TerrityoryId = territory.Id;
+            factRecon.TerritoryFileId = textId;
+
+            if (DateTime.TryParse(test.ElementAtOrDefault(0), out var starDate))
+            {
+                factRecon.PerEndDt = starDate;
+            }
+            else
+            {
+                var warning = new FileWarning();
+                warning.TerritoryId = territory.Id;
+                warning.TerritoryZipFileId = zipId;
+                warning.TerritoryTextFileId = textId;
+                warning.WarningMessage = "Fecha inválida: " + fieldNames[2];
+                warning.FileRow = testLine;
+                warning.WarningDate = DateTime.Now;
+
+                warnings.Add(warning);
+            }
+
+            if (test.ElementAtOrDefault(1).Length == 3 && test.ElementAtOrDefault(1) == territory.TerritoryCode)
+            {
+                factRecon.TerritoryCode = test.ElementAtOrDefault(1);
+            }
+            else
+            {
+                factRecon.TerritoryCode = "";
+
+                var warning = new FileWarning();
+                warning.TerritoryId = territory.Id;
+                warning.TerritoryZipFileId = zipId;
+                warning.TerritoryTextFileId = textId;
+                warning.WarningMessage = fieldNames[3] + " Código inválido: " + test.ElementAtOrDefault(1);
+                warning.FileRow = testLine;
+                warning.WarningDate = DateTime.Now;
+
+                warnings.Add(warning);
+            }
+
+            if (!string.IsNullOrEmpty(test.ElementAtOrDefault(2)))
+            {
+                try
+                {
+                    factRecon.FactCount = decimal.Parse(test.ElementAtOrDefault(2));
+                }
+                catch (FormatException)
+                {
+                    var warning = new FileWarning();
+                    warning.TerritoryId = territory.Id;
+                    warning.TerritoryZipFileId = zipId;
+                    warning.TerritoryTextFileId = textId;
+                    warning.WarningMessage = "Tipo de dato no coincide: " + fieldNames[4] /*txtFileData.ElementAtOrDefault(2)*/ + "(decimal)";
+                    warning.FileRow = testLine;
+                    warning.WarningDate = DateTime.Now;
+
+                    warnings.Add(warning);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(test.ElementAtOrDefault(3)))
+            {
+                try
+                {
+                    factRecon.ChrgCdHrs = decimal.Parse(test.ElementAtOrDefault(3));
+                }
+                catch (FormatException)
+                {
+                    var warning = new FileWarning();
+                    warning.TerritoryId = territory.Id;
+                    warning.TerritoryZipFileId = zipId;
+                    warning.TerritoryTextFileId = textId;
+                    warning.WarningMessage = "Tipo de dato no coincide: " + fieldNames[5] /*txtFileData.ElementAtOrDefault(3)*/ + "(decimal)";
+                    warning.FileRow = testLine;
+                    warning.WarningDate = DateTime.Now;
+
+                    warnings.Add(warning);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(test.ElementAtOrDefault(4)))
+            {
+                try
+                {
+                    factRecon.NetErnSvc = decimal.Parse(test.ElementAtOrDefault(4));
+                }
+                catch (FormatException)
+                {
+                    var warning = new FileWarning();
+                    warning.TerritoryId = territory.Id;
+                    warning.TerritoryZipFileId = zipId;
+                    warning.TerritoryTextFileId = textId;
+                    warning.WarningMessage = "Tipo de dato no coincide: " + fieldNames[6] /*txtFileData.ElementAtOrDefault(4)*/ + "(decimal)";
+                    warning.FileRow = testLine;
+                    warning.WarningDate = DateTime.Now;
+
+                    warnings.Add(warning);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(test.ElementAtOrDefault(5)))
+            {
+                try
+                {
+                    factRecon.GrossRev = decimal.Parse(test.ElementAtOrDefault(5));
+                }
+                catch (FormatException)
+                {
+                    var warning = new FileWarning();
+                    warning.TerritoryId = territory.Id;
+                    warning.TerritoryZipFileId = zipId;
+                    warning.TerritoryTextFileId = textId;
+                    warning.WarningMessage = "Tipo de dato no coincide: " + fieldNames[7] /*txtFileData.ElementAtOrDefault(5)*/ + "(decimal)";
+                    warning.FileRow = testLine;
+                    warning.WarningDate = DateTime.Now;
+
+                    warnings.Add(warning);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(test.ElementAtOrDefault(6)))
+            {
+                try
+                {
+                    factRecon.BillVar = decimal.Parse(test.ElementAtOrDefault(6));
+                }
+                catch (FormatException)
+                {
+                    var warning = new FileWarning();
+                    warning.TerritoryId = territory.Id;
+                    warning.TerritoryZipFileId = zipId;
+                    warning.TerritoryTextFileId = textId;
+                    warning.WarningMessage = "Tipo de dato no coincide: " + fieldNames[8] /*txtFileData.ElementAtOrDefault(6)*/ + "(decimal)";
+                    warning.FileRow = testLine;
+                    warning.WarningDate = DateTime.Now;
+
+                    warnings.Add(warning);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(test.ElementAtOrDefault(7)))
+            {
+                try
+                {
+                    factRecon.Provisions = decimal.Parse(test.ElementAtOrDefault(7));
+                }
+                catch (FormatException)
+                {
+                    var warning = new FileWarning();
+                    warning.TerritoryId = territory.Id;
+                    warning.TerritoryZipFileId = zipId;
+                    warning.TerritoryTextFileId = textId;
+                    warning.WarningMessage = "Tipo de dato no coincide: " + fieldNames[9] /*txtFileData.ElementAtOrDefault(7)*/ + "(decimal)";
+                    warning.FileRow = testLine;
+                    warning.WarningDate = DateTime.Now;
+
+                    warnings.Add(warning);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(test.ElementAtOrDefault(8)))
+            {
+                try
+                {
+                    factRecon.OthIncome = decimal.Parse(test.ElementAtOrDefault(8));
+                }
+                catch (FormatException)
+                {
+                    var warning = new FileWarning();
+                    warning.TerritoryId = territory.Id;
+                    warning.TerritoryZipFileId = zipId;
+                    warning.TerritoryTextFileId = textId;
+                    warning.WarningMessage = "Tipo de dato no coincide: " + fieldNames[10] /*txtFileData.ElementAtOrDefault(8)*/ + "(decimal)";
+                    warning.FileRow = testLine;
+                    warning.WarningDate = DateTime.Now;
+
+                    warnings.Add(warning);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(test.ElementAtOrDefault(9)))
+            {
+                try
+                {
+                    factRecon.TotalCost = decimal.Parse(test.ElementAtOrDefault(9));
+                }
+                catch (FormatException)
+                {
+                    var warning = new FileWarning();
+                    warning.TerritoryId = territory.Id;
+                    warning.TerritoryZipFileId = zipId;
+                    warning.TerritoryTextFileId = textId;
+                    warning.WarningMessage = "Tipo de dato no coincide: " + fieldNames[11] /*txtFileData.ElementAtOrDefault(9)*/ + "(decimal)";
+                    warning.FileRow = testLine;
+                    warning.WarningDate = DateTime.Now;
+
+                    warnings.Add(warning);
+                }
+            }
+
+            if (!string.IsNullOrEmpty(test.ElementAtOrDefault(10)))
+            {
+                try
+                {
+                    factRecon.NetMargin = decimal.Parse(test.ElementAtOrDefault(10));
+                }
+                catch (FormatException)
+                {
+                    var warning = new FileWarning();
+                    warning.TerritoryId = territory.Id;
+                    warning.TerritoryZipFileId = zipId;
+                    warning.TerritoryTextFileId = textId;
+                    warning.WarningMessage = "Tipo de dato no coincide: " + fieldNames[12] /*txtFileData.ElementAtOrDefault(10)*/ + "(decimal)";
+                    warning.FileRow = testLine;
+                    warning.WarningDate = DateTime.Now;
+
+                    warnings.Add(warning);
+                }
+            }
+
+            factsRecons.Add(factRecon);
+        }
+    }
+
+    return factsRecons;
+}
