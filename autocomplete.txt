@@ -1,3 +1,5 @@
+31-JAN-2026~URX~3353~31299.83~1745495.28~2841683.68~141502.92~-1237691.32~0~1486709.44~258785.84
+
 public async Task<List<FactReconciliation>> CheckFactReconFile(List<FileWarning> warnings, string file, Territory territory, long zipId, long textId)
 {
     var factsRecons = new List<FactReconciliation>();
