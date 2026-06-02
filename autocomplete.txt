@@ -1,52 +1,70 @@
-var groupUsers = users.SelectMany(u => u.Value.Groups.Select(
-    g => new
-    {
-        Group = g,
-        User = u
-    }
-)).GroupBy(x => x.Group).ToDictionary(
-    g => g.Key,
-    g => g.Select(x => x.User).ToList()
-);
+def ejecutar_carga_contactos_salesforce():
+    archivo_excel = entry_excel.get()
+    correo_login = entry_correo.get()
 
-using (var workbook = new XLWorkbook())
-{
-    var ws = workbook.Worksheets.Add("DevOps Project Users");
-    ws.Cell(1, 1).Value = projectName;
+    # Crear copia del Excel original
+    archivo_resultado = archivo_excel.replace(".xlsx", "_resultado.xlsx")
+    shutil.copy(archivo_excel, archivo_resultado)
 
-    var range = ws.Range("A1:C1");
-    range.Merge();
-    range.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-
-    ws.Cell(2, 1).Value = "Grupos";
-    ws.Cell(2, 2).Value = "Nombres";
-    //ws.Cell(2, 3).Value = "Email";
-
-    int row = 3;
-
-    foreach (var group in groupUsers)
-    {
-        ws.Cell(row, 1).Value = group.Key;
-
-        var members = string.Join(", ", group.Value.Select(U => $"{U.Value.Name} - {U.Value.Email}"));
+    # Abrimos con openpyxl para conservar estilos
+    workbook = load_workbook(archivo_resultado)
+    sheet = workbook.active
     
-        ws.Cell(row, 2).Value = members;
+    try:
+        if not archivo_excel or not correo_login:
+            raise Exception("Debes seleccionar un archivo Excel e ingresar un correo corporativo.")
 
-        row++;
+        # Leemos con pandas (sin perder compatibilidad)
+        df_resultado = pd.read_excel(archivo_resultado, engine='openpyxl')
         
-    }
+        if 'PRID' not in df_resultado.columns:
+            raise Exception("El archivo debe tener una columna llamada 'PRID'.")
+        
+        # ✅ Forzar tipos correctos para evitar el error float64
+        df_resultado['PRID'] = df_resultado['PRID'].astype(str).str.replace('.0', '', regex=False)
+        df_resultado['Estado'] = df_resultado['Estado'].astype(str)
+        df_resultado['Empresa'] = df_resultado['Empresa'].astype(str)
 
-    _loggerService.LogInfo($"Cantidad de Registros: {groupUsers.Count()}");
-    _loggerService.LogInfo($"Cantidad de Colaboradores: {collaboratorCount}");
+        # ✅ Limpiar valores "nan" que Pandas pone en celdas vacías
+        df_resultado['Estado'] = df_resultado['Estado'].replace('nan', '')
+        df_resultado['Empresa'] = df_resultado['Empresa'].replace('nan', '')
 
-    string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+        inicio = int(entry_inicio.get())
+        fin = int(entry_fin.get())
+        prids = df_resultado['PRID'].iloc[inicio - 1:fin].tolist()
 
-    string excelFileName = "DevOpsUsers - " + projectName + " - " + DateTime.Now.ToString("yyyy-MM-dd") + ".xlsx";
+        driver = GenerarBrowser()
+        if not driver:
+            raise Exception("No se pudo iniciar el navegador.")
 
-    ws.Columns().AdjustToContents();
-    //workbook.SaveAs("C:\\Users\\afleitas004\\Desktop\\DevOpsUsers.xlsx");
-    workbook.SaveAs(Path.Combine(desktopPath, excelFileName));
+        login_ok = login_pwc(driver, correo_login)
+        if not login_ok:
+            raise Exception("No se pudo realizar el login.")
+        
+        for idx, row in df_resultado.iloc[inicio - 1:fin].iterrows():
+            prid = row["PRID"]
+            log.insert(tk.END, f"Procesando fila {idx+1} - PRID: {prid}\n")
+            log.see(tk.END)
+            success = buscar_por_prid(driver, prid, row, df_resultado, idx, archivo_resultado, workbook, sheet)
 
-    _loggerService.LogInfo($"Archivo excel generado en el escritorio: {excelFileName} - {DateTime.Now}");
+            estado_actual = sheet.cell(row=idx + 2, column=9).value
+            if estado_actual is None:
+                sheet.cell(row=idx + 2, column=9).value = "Pendiente. Verificar log."
+                estado_actual = "Pendiente. Verificar log."
+            
+            empresa_actual = sheet.cell(row=idx + 2, column=10).value  # Columna J (Empresa)
+            if empresa_actual is None:
+                sheet.cell(row=idx + 2, column=10).value = "Pendiente. Verificar log."
+                empresa_actual = "Pendiente. Verificar log."
 
-}
+            log.insert(tk.END, f"Resultado PRID {prid}: {estado_actual} | Empresa: {empresa_actual}\n")
+            log.see(tk.END)
+            if not success:
+                log.insert(tk.END, f"Error en PRID: {prid}\n")
+
+        driver.quit()
+        messagebox.showinfo("Completado", "Carga de Contactos por PRIDs finalizado.")
+        logger.info("Carga de Contactos por PRIDs finalizado.")
+
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
