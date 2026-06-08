@@ -1,3 +1,817 @@
+import os
+import pyautogui
+import time
+import pandas as pd
+from pathlib import Path
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+#from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+#from webdriver_manager.chrome import ChromeDriverManager
+from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import shutil
+import threading
+import openpyxl
+from openpyxl import load_workbook
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import json
+import sys
+import logging
+
+#PrdUrl = "https://pwc.lightning.force.com/lightning/page/home"
+#StgUrl = "https://pwc--prvmay26.sandbox.lightning.force.com/lightning/page/home"
+
+#logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    filename="Log.log",
+    filemode="a"
+)
+
+logger = logging.getLogger(__name__)
+
+#leemos el config.jsom para usar los valores
+config_path = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "config.json"
+)
+
+with open(config_path, "r") as file:
+    config = json.load(file)
+
+StgUrl = config["SalesforceStageUrl"];
+
+#Solo para Ramiro: Simular selección de certificado
+def seleccionar_certificado_si_aplica():
+    try:
+        import pyautogui
+        print("[INFO] Esperando ventana de certificado...")
+        time.sleep(4)  #Esperar que aparezca la ventana
+        #Coordenadas personalizadas:
+        pyautogui.click(767, 260)  #Coordenada 1: Seleccionar Primer certificado
+        time.sleep(1)
+        pyautogui.click(1140, 440)  #Coordenada 2: clic en "OK"
+        print("[INFO] Certificado seleccionado automáticamente.")
+        time.sleep(5)
+    except Exception as e:
+        print(f"[WARNING] No se pudo hacer selección automática del certificado: {e}")
+
+mantener_activo_equipo = False
+def mantener_activa_la_laptop():
+    while mantener_activo_equipo:
+        try:
+            # Simula scroll lateral y luego lo regresa
+            pyautogui.scroll(10)   # scroll hacia arriba
+            time.sleep(1)
+            pyautogui.scroll(-10)  # scroll hacia abajo
+            print("[INFO] Simulación de actividad ejecutada.")
+        except Exception as e:
+            print(f"[WARNING] Error al simular actividad: {e}")
+        time.sleep(30)  # cada 4 minutos
+
+#Configurar Selenium
+def GenerarBrowser():
+    try:
+        #PATH_CHROME_DRIVER = Service("C:/Robot/chromedriver.exe")
+        chromeOptions = Options()
+        chromeOptions.add_argument("--start-maximized")
+        #service = Service(ChromeDriverManager().install())
+        #return webdriver.Chrome(service=service, options=chromeOptions)
+        return webdriver.Chrome(options=chromeOptions)
+    except Exception as e:
+        print("Ocurrió un error al generar el navegador:", e)
+        return None
+
+#Iniciar sesión en PwC Salesforce con correo corporativo
+def login_pwc(driver, correo):
+    try:
+        logger.info("Salesforce Contact Upload BOT - Iniciando")
+        url_login = StgUrl
+        driver.get(url_login)
+        time.sleep(5)
+
+        # Intentar detectar si aparece la pantalla de login (con timeout corto)
+        try:
+            campo_email_xpath = '/html/body/app-root/div/app-login-form/div[1]/div[2]/div/div/div[2]/form/input'
+            boton_login_xpath = '/html/body/app-root/div/app-login-form/div[1]/div[2]/div/div/div[2]/form/div[1]/div/div[2]/button'
+
+            # Esperar máximo 8 segundos a que aparezca el campo de email
+            campo_email = WebDriverWait(driver, 8).until(
+                EC.presence_of_element_located((By.XPATH, campo_email_xpath))
+            )
+            
+            # Si lo encontró, hacer el login normal
+            campo_email.clear()
+            campo_email.send_keys(correo)
+            time.sleep(3)
+
+            boton_login = driver.find_element(By.XPATH, boton_login_xpath)
+            boton_login.click()
+            
+            # En caso se tenga certificado, descomentar:
+            # seleccionar_certificado_si_aplica()
+
+            print(f"[LOGIN] Login enviado para: {correo}")
+            time.sleep(20)  # esperar carga
+
+        except Exception:
+            # No apareció la pantalla de login → ya tiene sesión activa
+            print(f"[LOGIN] No se detectó pantalla de login. Sesión ya activa o login automático.")
+            time.sleep(5)  # esperar que cargue el Home
+
+        # Verificar que estamos en Salesforce (buscar elemento del Home)
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.XPATH, 
+                    '//div[contains(@class,"slds")] | //header | //one-app-nav-bar'))
+            )
+            print(f"[LOGIN] Página de Salesforce cargada correctamente.")
+        except:
+            print(f"[WARNING] No se pudo confirmar carga de Salesforce, pero se continuará.")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Falló el login: {e}")
+        print(f"[ERROR] Falló el login: {e}")
+        return False
+
+#Buscar por codigo PRID
+def buscar_por_prid(driver, prid, row_data, df_resultado, row_index, archivo_resultado, workbook, sheet):
+    try:
+        # Paso 1: Hacer clic en el botón del header
+        logger.info("Buscando cuenta por PRID")
+        campo_boton_xpath = '/html/body/div[4]/div[1]/section/header/div[2]/div[2]/div/div/button'
+        WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, campo_boton_xpath))).click()
+        print("[INFO] Se hizo clic en el botón del buscador")
+        time.sleep(2)
+
+        # Paso 2: Esperar que el campo input real esté visible
+        campo_input_xpath = '/html/body/div[4]/div[2]/div/div/div[1]/div/div[1]/lightning-input/lightning-primitive-input-simple/div[1]/div/input'
+        campo_input = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.XPATH, campo_input_xpath))
+        )
+
+        # Paso 3: Enviar el codigo PRID
+        campo_input.clear()
+        campo_input.send_keys(str(prid))
+        time.sleep(1)
+        campo_input.send_keys(Keys.ENTER)
+        print(f"[INFO] PRID {prid} enviado. Esperando resultados...")
+        time.sleep(8)
+
+        # Paso 4: Hacer clic en la primera empresa de búsqueda por PRID
+        logger.info("Seleccionando cuenta.")
+        try:
+            resultado_xpath = '//table//tbody//tr[1]//th//a[contains(@class, "outputLookupLink")]'
+            link_resultado = WebDriverWait(driver, 15).until(
+                EC.element_to_be_clickable((By.XPATH, resultado_xpath))
+            )
+            nombre_empresa = link_resultado.get_attribute("title")
+            df_resultado.at[row_index, "Empresa"] = nombre_empresa
+            link_resultado.click()
+            print(f"[OK] Clic en el resultado: {nombre_empresa}")
+            time.sleep(8)
+        except Exception as e:
+            logger.error(f"No se pudo hacer clic en el resultado del PRID {prid}: {e}")
+            print(f"[ERROR] No se pudo hacer clic en el resultado del PRID {prid}: {e}")
+            return False
+
+        # Paso 5: Llegar a "Contacts" vía clic directo con esperas mejoradas
+        logger.info("Accediendo a contactos.")
+        try:
+            time.sleep(2)  # Pequeña espera para que cargue la sección
+            
+            # Strategy 1: Buscar por el texto "Contacts" primero para triggerear carga
+            try:
+                print("[INFO] Strategy 1: Buscando texto 'Contacts'...")
+                
+                span_contacts_texto = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, '//span[@title="Contacts"]'))
+                )
+                
+                print("[INFO] Texto 'Contacts' encontrado")
+                
+                # Hacer scroll hacia el texto para triggerear carga
+                print("[INFO] Haciendo scroll hacia texto 'Contacts'...")
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", span_contacts_texto)
+                time.sleep(3)  # Esperar a que cargue después del scroll
+                
+                # Ahora buscar el enlace <a> que contiene el span
+                print("[INFO] Buscando enlace que contiene 'Contacts'...")
+                
+                enlace_contacts_xpath = '//a[contains(@class, "baseCard__header-title-container") and .//span[@title="Contacts"]]'
+                enlace_contacts = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, enlace_contacts_xpath))
+                )
+                
+                print("[INFO] Enlace 'Contacts' es clickeable")
+                time.sleep(1)
+                
+                # Clic
+                try:
+                    enlace_contacts.click()
+                    print("[OK] Se hizo clic en 'Contacts' (Strategy 1 - método normal)")
+                except:
+                    driver.execute_script("arguments[0].click();", enlace_contacts)
+                    print("[OK] Se hizo clic en 'Contacts' (Strategy 1 - método JavaScript)")
+                
+                time.sleep(5)
+                
+            except Exception as e1:
+                print(f"[WARNING] Strategy 1 falló: {str(e1)[:100]}")
+                print("[INFO] Intentando Strategy 2: Scrolls manuales hacia abajo...")
+                
+                # Strategy 2: Hacer 6 scrolls hacia abajo y reintentar
+                try:
+                    print("[INFO] Haciendo 4 scrolls hacia abajo...")
+                    for i in range(4):
+                        driver.execute_script("window.scrollBy(0, 300);")
+                        print(f"[INFO] Scroll {i+1}/4 completado")
+                        time.sleep(0.5)
+                    
+                    time.sleep(2)  # Esperar a que cargue después de los scrolls
+                    
+                    print("[INFO] Buscando enlace 'Contacts' después de scrolls...")
+                    
+                    enlace_contacts_xpath = '//a[contains(@class, "baseCard__header-title-container") and .//span[@title="Contacts"]]'
+                    enlace_contacts = WebDriverWait(driver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, enlace_contacts_xpath))
+                    )
+                    
+                    print("[INFO] Enlace 'Contacts' es clickeable después de scrolls")
+                    time.sleep(1)
+                    
+                    # Hacer scroll hacia el elemento nuevamente para asegurar visibilidad
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", enlace_contacts)
+                    time.sleep(1)
+                    
+                    try:
+                        enlace_contacts.click()
+                        print("[OK] Se hizo clic en 'Contacts' (Strategy 2 - método normal)")
+                    except:
+                        driver.execute_script("arguments[0].click();", enlace_contacts)
+                        print("[OK] Se hizo clic en 'Contacts' (Strategy 2 - método JavaScript)")
+                    
+                    time.sleep(5)
+                    
+                except Exception as e2:
+                    print(f"[WARNING] Strategy 2 falló: {str(e2)[:100]}")
+                    print("[INFO] Intentando Strategy 3: Búsqueda por href...")
+                    
+                    # Strategy 3: Búsqueda flexible por href
+                    try:
+                        enlace_xpath = '//a[contains(@href, "/related/Contacts/")]'
+                        
+                        print("[INFO] Buscando por href...")
+                        
+                        enlace_contacts = WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.XPATH, enlace_xpath))
+                        )
+                        
+                        print("[INFO] Enlace encontrado por href, haciendo scroll...")
+                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", enlace_contacts)
+                        time.sleep(2)
+                        
+                        print("[INFO] Esperando que sea clickeable...")
+                        
+                        enlace_contacts = WebDriverWait(driver, 10).until(
+                            EC.element_to_be_clickable((By.XPATH, enlace_xpath))
+                        )
+                        
+                        time.sleep(1)
+                        
+                        try:
+                            enlace_contacts.click()
+                            print("[OK] Se hizo clic en 'Contacts' (Strategy 3 - método normal)")
+                        except:
+                            driver.execute_script("arguments[0].click();", enlace_contacts)
+                            print("[OK] Se hizo clic en 'Contacts' (Strategy 3 - método JavaScript)")
+                        
+                        time.sleep(5)
+                        
+                    except Exception as e3:
+                        print(f"[ERROR] Strategy 3 también falló: {str(e3)[:100]}")
+                        print("[INFO] Intentando Strategy 4: Scrolls hacia arriba + búsqueda...")
+                        
+                        # Strategy 4: Scroll hacia ARRIBA primero (a veces está arriba)
+                        try:
+                            print("[INFO] Haciendo scrolls hacia ARRIBA...")
+                            for i in range(4):
+                                driver.execute_script("window.scrollBy(0, -300);")
+                                print(f"[INFO] Scroll arriba {i+1}/4 completado")
+                                time.sleep(0.5)
+                            
+                            time.sleep(2)
+                            
+                            print("[INFO] Buscando enlace 'Contacts' después de scrolls hacia arriba...")
+                            
+                            enlace_contacts_xpath = '//a[contains(@class, "baseCard__header-title-container") and .//span[@title="Contacts"]]'
+                            enlace_contacts = WebDriverWait(driver, 10).until(
+                                EC.element_to_be_clickable((By.XPATH, enlace_contacts_xpath))
+                            )
+                            
+                            print("[INFO] Enlace 'Contacts' encontrado")
+                            
+                            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", enlace_contacts)
+                            time.sleep(1)
+                            
+                            try:
+                                enlace_contacts.click()
+                                print("[OK] Se hizo clic en 'Contacts' (Strategy 4 - método normal)")
+                            except:
+                                driver.execute_script("arguments[0].click();", enlace_contacts)
+                                print("[OK] Se hizo clic en 'Contacts' (Strategy 4 - método JavaScript)")
+                            
+                            time.sleep(5)
+                            
+                        except Exception as e4:
+                            print(f"[ERROR] Todas las 4 strategies fallaron")
+                            print(f"  - Strategy 1: {str(e1)[:80]}")
+                            print(f"  - Strategy 2: {str(e2)[:80]}")
+                            print(f"  - Strategy 3: {str(e3)[:80]}")
+                            print(f"  - Strategy 4: {str(e4)[:80]}")
+                            raise Exception("No se pudo hacer clic en 'Contacts' después de intentar 4 métodos diferentes")
+
+        except Exception as e:
+            logger.error(f"No se pudo hacer clic directo en 'Contacts': {e}")
+            print(f"[ERROR] No se pudo hacer clic directo en 'Contacts': {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        
+        # Paso 6: Hacer clic en el botón "New"
+        logger.info("Agregando nuevo contacto.")
+        try:
+            boton_nuevo_xpath = '//button[text()="New" and contains(@class, "slds-button_neutral")]'
+            boton_nuevo = WebDriverWait(driver, 15).until(
+                EC.element_to_be_clickable((By.XPATH, boton_nuevo_xpath))
+            )
+            boton_nuevo.click()
+            print(f"[OK] Se hizo clic en el botón 'New' para crear contacto del PRID {prid}")
+            time.sleep(5)
+        except Exception as e:
+            logger.error(f"No se pudo hacer clic en el botón 'New' del PRID {prid}: {e}")
+            print(f"[ERROR] No se pudo hacer clic en el botón 'New' del PRID {prid}: {e}")
+            return False
+
+        # Paso 7: Seleccionar "Account Contact" y hacer clic en "Next"
+        try:
+            #Verifica que esté seleccionada la opción correcta (por defecto ya viene marcada)
+            xpath_account_contact = '//span[text()="Account Contact"]'
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, xpath_account_contact)))
+            print(f"[OK] Tipo 'Account Contact' detectado")
+
+            #Hacer clic en "Next"
+            xpath_boton_next = '//button[span[text()="Next"]]'
+            boton_next = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, xpath_boton_next))
+            )
+            boton_next.click()
+            print(f"[OK] Se hizo clic en el botón 'Next'")
+            time.sleep(12)
+        except Exception as e:
+            logger.error(f"No se pudo seleccionar tipo de contacto o hacer clic en 'Next' para el PRID {prid}: {e}")
+            print(f"[ERROR] No se pudo seleccionar tipo de contacto o hacer clic en 'Next' para el PRID {prid}: {e}")
+            return False
+
+        # Paso 8: Completar campos del contacto
+        # Paso 8.1: Completar campo FirstName
+        logger.info("Completando datos del contacto.")
+        try:
+            input_first_name = WebDriverWait(driver, 2).until(
+                EC.presence_of_element_located((By.XPATH, '//input[@name="FirstName"]'))
+            )
+            # Hacer scroll hasta el input para evitar errores visuales
+            #driver.execute_script("arguments[0].scrollIntoView(true);", input_first_name)
+            input_first_name.clear()
+            input_first_name.send_keys(row_data["First Name"])
+            print(f"[OK] First Name ingresado para PRID {prid}")
+            time.sleep(3)
+        except Exception as e:
+            logger.error(f"No se pudo ingresar el First Name: {e}")
+            print(f"[ERROR] No se pudo ingresar el First Name: {e}")
+            return False
+        
+        # Paso 8.2: Completar campo LastName
+        try:
+            input_last_name = WebDriverWait(driver, 2).until(
+                EC.presence_of_element_located((By.XPATH, '//input[@name="LastName"]'))
+            )
+            #driver.execute_script("arguments[0].scrollIntoView(true);", input_last_name)
+            input_last_name.clear()
+            input_last_name.send_keys(row_data["Last Name"])
+            print(f"[OK] Last Name ingresado para PRID {prid}")
+            time.sleep(2)
+        except Exception as e:
+            logger.error(f"No se pudo ingresar el Last Name: {e}")
+            print(f"[ERROR] No se pudo ingresar el Last Name: {e}")
+            return False
+        
+        # Paso 8.3: Completar campo Email
+        try:
+            input_email = WebDriverWait(driver, 3).until(
+                EC.presence_of_element_located((By.XPATH, '//input[@name="Email"]'))
+            )
+            driver.execute_script("arguments[0].scrollIntoView(true);", input_email)
+            input_email.clear()
+            input_email.send_keys(row_data["Email"])
+            print(f"[OK] Email ingresado para PRID {prid}")
+            time.sleep(2)
+        except Exception as e:
+            logger.error(f"No se pudo ingresar el Email: {e}")
+            print(f"[ERROR] No se pudo ingresar el Email: {e}")
+            return False
+
+        # Paso 8.4: Completar campo Title
+        try:
+            input_title = WebDriverWait(driver, 2).until(
+                EC.presence_of_element_located((By.XPATH, '//input[@name="Title"]'))
+            )
+            driver.execute_script("arguments[0].scrollIntoView(true);", input_title)
+            input_title.clear()
+            input_title.send_keys(row_data["Title"])
+            print(f"[OK] Title ingresado para PRID {prid}")
+            time.sleep(2)
+        except Exception as e:
+            logger.error(f"No se pudo ingresar el Title: {e}")
+            print(f"[ERROR] No se pudo ingresar el Title: {e}")
+            return False
+
+        # Normalización y mapeo personalizado de valores del Excel a los visibles en Salesforce
+        level_map = {
+            "C LEVEL": "C Level",
+            "STAFF": "Staff",
+            "Staff": "Staff",
+            "MANAGER": "Manager",
+            "Manager": "Manager"
+        }
+
+        # Paso 8.5: Completar campo Level
+        try:
+            # Obtener y normalizar el valor del Excel
+            valor_level_excel = row_data["Level"].strip()
+            print(f"[DEBUG] Valor Level del Excel (original): '{valor_level_excel}'")
+            
+            # Mapeo más completo con normalizaciones
+            level_map = {
+                # Variantes de C Level
+                "C LEVEL": "C Level",
+                "C-LEVEL": "C Level",
+                "CLEVEL": "C Level",
+                # Variantes de Director/VP
+                "DIRECTOR/VP": "Director/VP",
+                "DIRECTOR / VP": "Director/VP",
+                "DIRECTOR/VP ": "Director/VP",
+                "DIRECTOR VP": "Director/VP",
+                # Variantes de Division C-Suite
+                "DIVISION C-SUITE / BUSINESS UNIT LEADER": "Division C-Suite / Business Unit Leader",
+                "DIVISION C-SUITE/BUSINESS UNIT LEADER": "Division C-Suite / Business Unit Leader",
+                "DIVISION C-SUITE": "Division C-Suite / Business Unit Leader",
+                "C-SUITE / BUSINESS UNIT LEADER": "Division C-Suite / Business Unit Leader",
+                # Manager
+                "MANAGER": "Manager",
+                "MANAGER ": "Manager",
+                # Staff
+                "STAFF": "Staff",
+                "STAFF ": "Staff",
+                # Board
+                "BOARD OR NON EXECUTIVE DIRECTOR": "Board or Non Executive Director",
+                "BOARD": "Board or Non Executive Director",
+                "NON EXECUTIVE DIRECTOR": "Board or Non Executive Director",
+                # Other
+                "OTHER": "Other",
+                "OTHER ": "Other",
+                # Shareholder
+                "SHAREHOLDER PRIVATE BUSINESS": "Shareholder Private Business",
+                "SHAREHOLDER": "Shareholder Private Business",
+            }
+            
+            # Normalizar: remover espacios extras, convertir a mayúscula
+            valor_normalizado = valor_level_excel.strip().upper()
+            valor_normalizado = " ".join(valor_normalizado.split())  # Elimina espacios múltiples
+            
+            valor_level = level_map.get(valor_normalizado)
+            
+            print(f"[DEBUG] Valor Level normalizado: '{valor_normalizado}'")
+            print(f"[DEBUG] Valor Level mapeado: '{valor_level}'")
+
+            if not valor_level:
+                # Si no encuentra match exacto, intentar búsqueda parcial más inteligente
+                print(f"[WARNING] No se encontró match exacto para '{valor_normalizado}', intentando búsqueda flexible...")
+                
+                # Búsqueda parcial inteligente
+                if "DIRECTOR" in valor_normalizado and "VP" in valor_normalizado:
+                    valor_level = "Director/VP"
+                elif "DIVISION" in valor_normalizado and "C-SUITE" in valor_normalizado:
+                    valor_level = "Division C-Suite / Business Unit Leader"
+                elif "DIRECTOR" in valor_normalizado and "C" in valor_normalizado:
+                    valor_level = "Board or Non Executive Director"
+                elif "MANAGER" in valor_normalizado:
+                    valor_level = "Manager"
+                elif "STAFF" in valor_normalizado:
+                    valor_level = "Staff"
+                elif "C LEVEL" in valor_normalizado or "CLEVEL" in valor_normalizado:
+                    valor_level = "C Level"
+                else:
+                    raise ValueError(f"Nivel desconocido y no se pudo hacer match flexible: {valor_level_excel}")
+
+            print(f"[INFO] Nivel final a seleccionar: '{valor_level}'")
+
+            # Localizar el botón del combobox Level
+            level_button = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.XPATH, '//button[@name="Level__c"]'))
+            )
+            
+            # Scroll hasta el combobox para centrarlo en pantalla
+            driver.execute_script(
+                "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", 
+                level_button
+            )
+            time.sleep(1)
+            
+            # Abrir el combobox con JavaScript
+            driver.execute_script("arguments[0].click();", level_button)
+            print(f"[INFO] Combobox Level abierto para PRID {prid}")
+            time.sleep(2)
+
+            # Verificar que el dropdown esté abierto
+            WebDriverWait(driver, 5).until(
+                lambda d: level_button.get_attribute("aria-expanded") == "true"
+            )
+
+            # ✅ Buscar el item exacto en el dropdown
+            try:
+                opcion_xpath = f'//lightning-base-combobox-item[.//span[@title="{valor_level}"]]'
+                opcion = WebDriverWait(driver, 3).until(
+                    EC.presence_of_element_located((By.XPATH, opcion_xpath))
+                )
+                print(f"[INFO] Opción encontrada en dropdown: {valor_level}")
+                
+                # Scroll hacia la opción si es necesario
+                driver.execute_script("arguments[0].scrollIntoView(true);", opcion)
+                time.sleep(0.5)
+                
+                # Clic en la opción
+                driver.execute_script("arguments[0].click();", opcion)
+                print(f"[OK] Level seleccionado: {valor_level} para PRID {prid}")
+                time.sleep(2)
+
+            except Exception as e:
+                print(f"[ERROR] No se encontró la opción '{valor_level}' en el dropdown: {e}")
+                # Intentar con enter después de escribir
+                ActionChains(driver).send_keys(valor_level).perform()
+                time.sleep(1)
+                ActionChains(driver).send_keys(Keys.ENTER).perform()
+                print(f"[INFO] Intentado seleccionar con escritura + ENTER")
+                time.sleep(2)
+
+            # ✅ Verificar que se seleccionó correctamente
+            valor_seleccionado = level_button.get_attribute("data-value")
+            print(f"[DEBUG] Valor final en data-value: '{valor_seleccionado}'")
+            
+            if valor_seleccionado and valor_seleccionado != "--None--":
+                print(f"[OK] Verificación OK: Level quedó seleccionado")
+            else:
+                print(f"[WARNING] Level podría no haber quedado seleccionado correctamente")
+
+        except Exception as e:
+            logger.error(f"No se pudo seleccionar el Level para PRID {prid}: {e}")
+            print(f"[ERROR] No se pudo seleccionar el Level para PRID {prid}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+        # Paso 8.6: Completar campo Country
+        try:
+            # Paso 1: Obtener el país del Excel
+            pais_excel = row_data["País"].strip()
+            print(f"[INFO] Intentando seleccionar país: {pais_excel}")
+
+            # Paso 2: Hacer clic en el botón del combobox
+            xpath_boton_country = '//button[contains(@name, "Primary_Country__c")]'
+            boton_country = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, xpath_boton_country))
+                
+            )
+            driver.execute_script("arguments[0].scrollIntoView(true);", boton_country)
+            boton_country.click()
+            time.sleep(1)
+
+            # Paso 3: Scroll dinámico y clic en la opción deseada
+            xpath_opcion_pais = f'//span[@title="{pais_excel}"]'
+            """
+            opcion_pais = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.XPATH, xpath_opcion_pais))
+            )
+            driver.execute_script("arguments[0].scrollIntoView(true);", opcion_pais)
+            opcion_pais.click()
+            """
+            WebDriverWait(driver, 8).until(
+                lambda d: d.find_element(By.XPATH, xpath_opcion_pais).is_displayed()
+                        and d.find_element(By.XPATH, xpath_opcion_pais).size['height'] > 0
+            )
+
+            # Paso 3: Forzar clic con JavaScript por seguridad
+            opcion_pais = driver.find_element(By.XPATH, xpath_opcion_pais)
+            driver.execute_script("arguments[0].scrollIntoView(true);", opcion_pais)
+            driver.execute_script("arguments[0].click();", opcion_pais)
+
+            print(f"[OK] Country seleccionado: {pais_excel}")
+            time.sleep(4)
+
+        except Exception as e:
+            logger.error(f"No se pudo seleccionar el país {pais_excel}: {e}")
+            print(f"[ERROR] No se pudo seleccionar el país {pais_excel}: {e}")
+            sheet.cell(row=row_index + 2, column=9).value = "Contacto Complejo"
+            sheet.cell(row=row_index + 2, column=10).value = nombre_empresa
+            workbook.save(archivo_resultado)
+            print(f"[INFO] Contacto Complejo registrado en Excel para PRID {prid}")
+            try:
+                # Cancelar formulario
+                xpath_cancel = '//button[text()="Cancel" and contains(@class, "slds-button_neutral")]'
+                boton_cancelar = WebDriverWait(driver, 2).until(
+                    EC.element_to_be_clickable((By.XPATH, xpath_cancel))
+                )
+                boton_cancelar.click()
+                print(f"[OK] Cancelado contacto con error en país PRID {prid}")
+                time.sleep(3)
+            except Exception as cancel_err:
+                print(f"[WARNING] No se pudo hacer clic en Cancel tras error en país: {cancel_err}")
+
+            try:
+                driver.get(StgUrl)
+                time.sleep(5)
+                print(f"[INFO] Redireccionado al Home después de contacto complejo PRID {prid}")
+            except Exception as nav_err:
+                print(f"[ERROR] No se pudo volver al Home tras error de país en PRID {prid}: {nav_err}")
+            return True  # Continuar con el siguiente contacto
+
+        # Paso 8.7: Hacer clic en botón "Save"
+        logger.info("Guardando contacto.")
+        try:
+            xpath_boton_save = '//button[@type="button" and contains(@class, "slds-button_brand") and text()="Save"]'
+                                #/html/body/div[4]/div[1]/section/div[2]/div[2]/div[2]/div[1]/div/div/div/div[5]/div[1]/div/div/div[3]/button[2]
+            boton_save = WebDriverWait(driver, 4).until(
+                EC.element_to_be_clickable((By.XPATH, xpath_boton_save))
+            )
+            driver.execute_script("arguments[0].scrollIntoView(true);", boton_save)
+            boton_save.click()
+            print(f"[OK] Se hizo clic en 'Save' para guardar contacto de PRID {prid}")
+            time.sleep(6)  # esperar confirmación
+
+             # ✅ Detectar mensaje de éxito con múltiples XPaths
+            exito_detectado = False
+            xpaths_exito = [
+                '//div[@data-key="success"]',
+                '//div[contains(@class, "slds-theme--success")]',
+                '//div[contains(@class, "forceToastMessage") and contains(@class, "slds-theme--success")]',
+                '//div[contains(@class, "slds-notify--toast") and contains(@class, "slds-theme--success")]',
+                '//div[contains(@class, "slds-theme_success")]',
+            ]
+
+            for xpath in xpaths_exito:
+                try:
+                    WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, xpath))
+                    )
+                    exito_detectado = True
+                    print(f"[OK] Contacto guardado correctamente en PRID {prid} (detectado con: {xpath})")
+                    break
+                except:
+                    continue
+
+            if not exito_detectado:
+                print(f"[WARNING] No se detectó mensaje de éxito tras guardar en PRID {prid}")
+
+            # Verificar si aparece mensaje de duplicado por email
+            try:
+                mensaje_error_xpath = '//span[contains(text(), "email address already exists")]'
+                WebDriverWait(driver, 2).until(
+                    EC.presence_of_element_located((By.XPATH, mensaje_error_xpath))
+                )
+                print(f"[INFO] Email duplicado detectado en PRID {prid}")
+                sheet.cell(row=row_index + 2, column=9).value = "Duplicado" #El número 9 es de Columna I
+                sheet.cell(row=row_index + 2, column=10).value = nombre_empresa #El número 10 es de Columna J
+                workbook.save(archivo_resultado)
+                print(f"[INFO] Duplicado registrado en Excel para PRID {prid}")
+                # Clic en botón "Cancel"
+                xpath_cancel = '//button[text()="Cancel" and contains(@class, "slds-button_neutral")]'
+                boton_cancelar = WebDriverWait(driver, 3).until(
+                    EC.element_to_be_clickable((By.XPATH, xpath_cancel))
+                )
+                boton_cancelar.click()
+                print(f"[OK] Cancelado contacto duplicado en PRID {prid}")
+                time.sleep(3)
+                # Ir al Home
+                try:
+                    driver.get(StgUrl)
+                    time.sleep(5)
+                    print(f"[INFO] Redireccionado al Home después de PRID {prid}")
+                except Exception as e:
+                    print(f"[ERROR] No se pudo volver al Home tras guardar contacto para PRID {prid}: {e}")
+                return True  # Seguimos al siguiente contacto
+            except:
+                # No se detectó mensaje de error, se asume guardado exitoso
+                pass
+
+            # Verificar si aparece mensaje de duplicado por Duplicates
+            try:
+                mensaje_duplicate_xpath = '//span[contains(text(), "This record looks like a duplicate.")]'
+                WebDriverWait(driver, 3).until(
+                    EC.presence_of_element_located((By.XPATH, mensaje_duplicate_xpath))
+                )
+                print(f"[INFO] Email duplicado detectado en PRID {prid}")
+                sheet.cell(row=row_index + 2, column=9).value = "Duplicado" #El número 9 es de Columna I
+                sheet.cell(row=row_index + 2, column=10).value = nombre_empresa #El número 10 es de Columna J
+                workbook.save(archivo_resultado)
+                print(f"[INFO] Duplicado registrado en Excel para PRID {prid}")
+
+                # Clic en botón "Cancel"
+                xpath_cancel = '//button[text()="Cancel" and contains(@class, "slds-button_neutral")]'
+                boton_cancelar = WebDriverWait(driver, 2).until(
+                    EC.element_to_be_clickable((By.XPATH, xpath_cancel))
+                )
+                boton_cancelar.click()
+                logger.info(f"Contacto duplicado registrado en Excel para PRID {prid}. Cancelado contacto duplicado.")
+                print(f"[OK] Cancelado contacto duplicado en PRID {prid}")
+                time.sleep(3)
+                # Ir al Home
+                try:
+                    driver.get(StgUrl)
+                    time.sleep(5)
+                    print(f"[INFO] Redireccionado al Home después de PRID {prid}")
+                except Exception as e:
+                    print(f"[ERROR] No se pudo volver al Home tras guardar contacto para PRID {prid}: {e}")
+                return True  # Seguimos al siguiente contacto
+            except:
+                # No se detectó mensaje de error, se asume guardado exitoso
+                pass
+
+            try:
+                mensaje_error_generico = '//div[contains(@class, "slds-notify_alert") and contains(@class, "slds-theme_error")]'
+                WebDriverWait(driver, 3).until(
+                    EC.presence_of_element_located((By.XPATH, mensaje_error_generico))
+                )
+                print(f"[INFO] Se detectó un mensaje de error tras guardar contacto en PRID {prid}")
+                sheet.cell(row=row_index + 2, column=9).value = "Error" #El número 9 es de Columna I
+                sheet.cell(row=row_index + 2, column=10).value = nombre_empresa #El número 10 es de Columna J
+                workbook.save(archivo_resultado)
+                print(f"[INFO] Error registrado en Excel para PRID {prid}")
+
+                # Clic en botón "Cancel"
+                xpath_cancel = '//button[text()="Cancel" and contains(@class, "slds-button_neutral")]'
+                boton_cancelar = WebDriverWait(driver, 2).until(
+                    EC.element_to_be_clickable((By.XPATH, xpath_cancel))
+                )
+                boton_cancelar.click()
+                print(f"[OK] Cancelado formulario por error en PRID {prid}")
+                time.sleep(3)
+                # Ir al Home
+                try:
+                    driver.get(StgUrl)
+                    time.sleep(5)
+                    print(f"[INFO] Redireccionado al Home después de PRID {prid}")
+                except Exception as e:
+                    print(f"[ERROR] No se pudo volver al Home tras guardar contacto para PRID {prid}: {e}")
+                return True  # Seguimos al siguiente contacto
+            except:
+                # No se detectó mensaje de error, se asume guardado exitoso
+                pass
+
+        except Exception as e:
+            logger.error(f"No se pudo hacer clic en 'Save' para PRID {prid}: {e}")
+            print(f"[ERROR] No se pudo hacer clic en 'Save' para PRID {prid}: {e}")
+            return False
+        
+        # Paso 9: Volver al home para continuar con el siguiente PRID
+        try:
+            driver.get(StgUrl)
+            sheet.cell(row=row_index + 2, column=9).value = "Subido" #El número 9 es de Columna I
+            sheet.cell(row=row_index + 2, column=10).value = nombre_empresa #El número 10 es de Columna J
+            workbook.save(archivo_resultado)
+            logger.info(f"Contacto subido registrado en Excel para PRID {prid}.")
+            print(f"[INFO] Contacto Subido registrado en Excel para PRID {prid}")
+            time.sleep(5)
+            print(f"[INFO] Redireccionado al Home después de PRID {prid}")
+            time.sleep(5)
+        except Exception as e:
+            print(f"[ERROR] No se pudo volver al Home tras guardar contacto para PRID {prid}: {e}")
+
+        return True
+    
+    except Exception as e:
+        logger.error(f"Error al buscar PRID {prid}: {e}")
+        print(f"[ERROR] al buscar PRID {prid}: {e}")
+        return False
+
+# Ejecutar carga de contactos en Salesforce por PRID
 def ejecutar_carga_contactos_salesforce():
     archivo_excel = entry_excel.get()
     correo_login = entry_correo.get()
@@ -47,15 +861,20 @@ def ejecutar_carga_contactos_salesforce():
             log.see(tk.END)
             success = buscar_por_prid(driver, prid, row, df_resultado, idx, archivo_resultado, workbook, sheet)
 
+            driver.get(StgUrl)
+            time.sleep(5)
+
             estado_actual = sheet.cell(row=idx + 2, column=9).value
             if estado_actual is None:
-                sheet.cell(row=idx + 2, column=9).value = "Pendiente. Verificar log."
                 estado_actual = "Pendiente. Verificar log."
-            
+                sheet.cell(row=idx + 2, column=9).value = estado_actual
+                
             empresa_actual = sheet.cell(row=idx + 2, column=10).value  # Columna J (Empresa)
             if empresa_actual is None:
-                sheet.cell(row=idx + 2, column=10).value = "Pendiente. Verificar log."
                 empresa_actual = "Pendiente. Verificar log."
+                sheet.cell(row=idx + 2, column=10).value = empresa_actual
+
+            workbook.save(archivo_resultado)
 
             log.insert(tk.END, f"Resultado PRID {prid}: {estado_actual} | Empresa: {empresa_actual}\n")
             log.see(tk.END)
@@ -68,3 +887,65 @@ def ejecutar_carga_contactos_salesforce():
 
     except Exception as e:
         messagebox.showerror("Error", str(e))
+
+def activar_o_deshabilitar_simulador():
+    global mantener_activo
+    mantener_activo = activar_no_suspension_var.get()
+    if mantener_activo:
+        print("[INFO] Modo No Suspensión ACTIVADO")
+        threading.Thread(target=mantener_activa_la_laptop, daemon=True).start()
+    else:
+        print("[INFO] Modo No Suspensión DESACTIVADO")
+
+# Interfaz gráfica
+root = tk.Tk()
+root.title("PwC | Carga de Contactos en Salesforce")
+#root.title("PwC Peru | Carga de Contactos en Salesforce")
+root.geometry("1000x700")
+
+frame = tk.Frame(root, padx=20, pady=15)
+frame.pack(fill=tk.BOTH, expand=True)
+
+tk.Label(frame, text="Carga de Contactos en Salesforce", font=("Arial", 14, "bold")).grid(row=0, column=0, columnspan=3, pady=10)
+
+# Correo
+tk.Label(frame, text="Correo corporativo para login:").grid(row=1, column=0, sticky="e", padx=(0,10))
+entry_correo = tk.Entry(frame, width=60)
+entry_correo.grid(row=1, column=1, sticky="w", columnspan=2)
+
+# Excel
+tk.Label(frame, text="Archivo Excel de Contactos:").grid(row=2, column=0, sticky="e", padx=(0,10))
+entry_excel = tk.Entry(frame, width=60)
+entry_excel.grid(row=2, column=1, sticky="w")
+tk.Button(frame, text="Examinar", command=lambda: entry_excel.insert(0, filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")]))).grid(row=2, column=2)
+
+# Rango
+tk.Label(frame, text="Rango de filas de contactos:").grid(row=3, column=0, sticky="e", padx=(0,10))
+rango_frame = tk.Frame(frame)
+rango_frame.grid(row=3, column=1, sticky="w")
+entry_inicio = tk.Entry(rango_frame, width=10)
+entry_inicio.pack(side=tk.LEFT)
+tk.Label(rango_frame, text=" a ").pack(side=tk.LEFT)
+entry_fin = tk.Entry(rango_frame, width=10)
+entry_fin.pack(side=tk.LEFT)
+
+#Checkbox para activar No Suspensión
+activar_no_suspension_var = tk.BooleanVar()
+tk.Checkbutton(
+    frame,
+    text="Activar No Suspensión de Equipo",
+    variable=activar_no_suspension_var,
+    command=activar_o_deshabilitar_simulador
+).grid(row=4, column=0, sticky="w")
+
+# Botón de ejecutar
+tk.Button(frame, text="Buscar PRIDs en SalesForce", bg="purple", fg="white", command=ejecutar_carga_contactos_salesforce).grid(row=5, column=1, pady=15)
+
+# Log
+log = tk.Text(frame, height=15, wrap=tk.WORD)
+log.grid(row=6, column=0, columnspan=3, sticky="nsew", pady=(10,0))
+
+frame.rowconfigure(5, weight=1)
+frame.columnconfigure(1, weight=1)
+
+root.mainloop()
