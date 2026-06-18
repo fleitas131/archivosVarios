@@ -26,6 +26,9 @@ import logging
 #PrdUrl = "https://pwc.lightning.force.com/lightning/page/home"
 #StgUrl = "https://pwc--prvmay26.sandbox.lightning.force.com/lightning/page/home"
 
+#flag para cuenta en busqueda
+no_account = False
+
 #logging
 logging.basicConfig(
     level=logging.INFO,
@@ -36,13 +39,15 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-#leemos el config.jsom para usar los valores
-config_path = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "config.json"
-)
+#leemos el config.json para usar los valores
+#path ejecutable
+#config_path = os.path.join(os.path.dirname(sys.executable), "config.json")
 
-with open(config_path, "r") as file:
+#path debug
+config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+#sacamos la url del config.json
+with open(config_path, "r", encoding="utf-8") as file:
     config = json.load(file)
 
 StgUrl = config["SalesforceStageUrl"];
@@ -139,7 +144,8 @@ def login_pwc(driver, correo):
 
     except Exception as e:
         logger.error(f"Falló el login: {e}")
-        print(f"[ERROR] Falló el login: {e}")
+        #print(f"[ERROR] Falló el login: {e}")
+        print("[ERROR] Falló el login")
         return False
 
 #Buscar por codigo PRID
@@ -179,8 +185,12 @@ def buscar_por_prid(driver, prid, row_data, df_resultado, row_index, archivo_res
             print(f"[OK] Clic en el resultado: {nombre_empresa}")
             time.sleep(8)
         except Exception as e:
-            logger.error(f"No se pudo hacer clic en el resultado del PRID {prid}: {e}")
-            print(f"[ERROR] No se pudo hacer clic en el resultado del PRID {prid}: {e}")
+            no_account = True
+            logger.error(f"No hay resultados para el PRID {prid}: {e}")
+            #print(f"[ERROR] No hay resultados para el PRID {prid}: {e}")
+            print(f"[ERROR] No hay resultados para el PRID {prid}")
+            sheet.cell(row=row_index + 2, column=9).value = "Pendiente (No existe PRID)"
+            sheet.cell(row=row_index + 2, column=10).value = "Pendiente (No existe PRID)"
             return False
 
         # Paso 5: Llegar a "Contacts" vía clic directo con esperas mejoradas
@@ -333,15 +343,18 @@ def buscar_por_prid(driver, prid, row_data, df_resultado, row_index, archivo_res
                             
                         except Exception as e4:
                             print(f"[ERROR] Todas las 4 strategies fallaron")
-                            print(f"  - Strategy 1: {str(e1)[:80]}")
+                            '''print(f"  - Strategy 1: {str(e1)[:80]}")
                             print(f"  - Strategy 2: {str(e2)[:80]}")
                             print(f"  - Strategy 3: {str(e3)[:80]}")
-                            print(f"  - Strategy 4: {str(e4)[:80]}")
+                            print(f"  - Strategy 4: {str(e4)[:80]}")'''
                             raise Exception("No se pudo hacer clic en 'Contacts' después de intentar 4 métodos diferentes")
 
         except Exception as e:
-            logger.error(f"No se pudo hacer clic directo en 'Contacts': {e}")
-            print(f"[ERROR] No se pudo hacer clic directo en 'Contacts': {e}")
+            logger.error(f"No se encontró la pestaña 'Contacts': {e}")
+            #print(f"[ERROR] No se encontró la pestaña 'Contacts': {e}")
+            print(f"[ERROR] No se encontró la pestaña 'Contacts'")
+            sheet.cell(row=row_index + 2, column=9).value = "Pendiente (No existe PRID)"
+            sheet.cell(row=row_index + 2, column=10).value = "Pendiente (No existe PRID)"
             import traceback
             traceback.print_exc()
             return False
@@ -357,8 +370,9 @@ def buscar_por_prid(driver, prid, row_data, df_resultado, row_index, archivo_res
             print(f"[OK] Se hizo clic en el botón 'New' para crear contacto del PRID {prid}")
             time.sleep(5)
         except Exception as e:
-            logger.error(f"No se pudo hacer clic en el botón 'New' del PRID {prid}: {e}")
-            print(f"[ERROR] No se pudo hacer clic en el botón 'New' del PRID {prid}: {e}")
+            logger.error(f"No se encuentra la opción 'New' del PRID {prid}: {e}")
+            #print(f"[ERROR] No se encuentra la opción 'New' del PRID {prid}: {e}")
+            print(f"[ERROR] No se encuentra la opción 'New' del PRID {prid}")
             return False
 
         # Paso 7: Seleccionar "Account Contact" y hacer clic en "Next"
@@ -397,6 +411,9 @@ def buscar_por_prid(driver, prid, row_data, df_resultado, row_index, archivo_res
         except Exception as e:
             logger.error(f"No se pudo ingresar el First Name: {e}")
             print(f"[ERROR] No se pudo ingresar el First Name: {e}")
+            sheet.cell(row=row_index + 2, column=9).value = "Pendiente (Error campo: First Name)"
+            sheet.cell(row=row_index + 2, column=10).value = "Pendiente (Error campo: First Name)"
+            
             return False
         
         # Paso 8.2: Completar campo LastName
@@ -412,6 +429,8 @@ def buscar_por_prid(driver, prid, row_data, df_resultado, row_index, archivo_res
         except Exception as e:
             logger.error(f"No se pudo ingresar el Last Name: {e}")
             print(f"[ERROR] No se pudo ingresar el Last Name: {e}")
+            sheet.cell(row=row_index + 2, column=9).value = "Pendiente (Error campo: Last Name)"
+            sheet.cell(row=row_index + 2, column=10).value = "Pendiente (Error campo: Last Name)"
             return False
         
         # Paso 8.3: Completar campo Email
@@ -427,6 +446,8 @@ def buscar_por_prid(driver, prid, row_data, df_resultado, row_index, archivo_res
         except Exception as e:
             logger.error(f"No se pudo ingresar el Email: {e}")
             print(f"[ERROR] No se pudo ingresar el Email: {e}")
+            sheet.cell(row=row_index + 2, column=9).value = "Pendiente (Error campo: Email)"
+            sheet.cell(row=row_index + 2, column=10).value = "Pendiente (Error campo: Email)"
             return False
 
         # Paso 8.4: Completar campo Title
@@ -442,6 +463,8 @@ def buscar_por_prid(driver, prid, row_data, df_resultado, row_index, archivo_res
         except Exception as e:
             logger.error(f"No se pudo ingresar el Title: {e}")
             print(f"[ERROR] No se pudo ingresar el Title: {e}")
+            sheet.cell(row=row_index + 2, column=9).value = "Pendiente (Error campo: Title)"
+            sheet.cell(row=row_index + 2, column=10).value = "Pendiente (Error campo: Title)"
             return False
 
         # Normalización y mapeo personalizado de valores del Excel a los visibles en Salesforce
@@ -583,7 +606,10 @@ def buscar_por_prid(driver, prid, row_data, df_resultado, row_index, archivo_res
 
         except Exception as e:
             logger.error(f"No se pudo seleccionar el Level para PRID {prid}: {e}")
-            print(f"[ERROR] No se pudo seleccionar el Level para PRID {prid}: {e}")
+            #print(f"[ERROR] No se pudo seleccionar el Level para PRID {prid}: {e}")
+            print(f"[ERROR] No se pudo seleccionar el Level para PRID {prid}")
+            sheet.cell(row=row_index + 2, column=9).value = "Pendiente (Error campo: Level)"
+            sheet.cell(row=row_index + 2, column=10).value = "Pendiente (Error campo: Level)"
             import traceback
             traceback.print_exc()
             return False
@@ -628,7 +654,8 @@ def buscar_por_prid(driver, prid, row_data, df_resultado, row_index, archivo_res
 
         except Exception as e:
             logger.error(f"No se pudo seleccionar el país {pais_excel}: {e}")
-            print(f"[ERROR] No se pudo seleccionar el país {pais_excel}: {e}")
+            #print(f"[ERROR] No se pudo seleccionar el país {pais_excel}: {e}")
+            print(f"[ERROR] No se pudo seleccionar el país {pais_excel}")
             sheet.cell(row=row_index + 2, column=9).value = "Contacto Complejo"
             sheet.cell(row=row_index + 2, column=10).value = nombre_empresa
             workbook.save(archivo_resultado)
@@ -861,25 +888,29 @@ def ejecutar_carga_contactos_salesforce():
             log.see(tk.END)
             success = buscar_por_prid(driver, prid, row, df_resultado, idx, archivo_resultado, workbook, sheet)
 
-            driver.get(StgUrl)
-            time.sleep(5)
+            if not success:
+                driver.get(StgUrl)
+                time.sleep(5)
 
             estado_actual = sheet.cell(row=idx + 2, column=9).value
-            if estado_actual is None:
+            '''if estado_actual is None:
                 estado_actual = "Pendiente. Verificar log."
-                sheet.cell(row=idx + 2, column=9).value = estado_actual
+                sheet.cell(row=idx + 2, column=9).value = estado_actual'''
                 
             empresa_actual = sheet.cell(row=idx + 2, column=10).value  # Columna J (Empresa)
-            if empresa_actual is None:
+            '''if empresa_actual is None:
                 empresa_actual = "Pendiente. Verificar log."
-                sheet.cell(row=idx + 2, column=10).value = empresa_actual
+                sheet.cell(row=idx + 2, column=10).value = empresa_actual'''
 
             workbook.save(archivo_resultado)
 
             log.insert(tk.END, f"Resultado PRID {prid}: {estado_actual} | Empresa: {empresa_actual}\n")
             log.see(tk.END)
             if not success:
-                log.insert(tk.END, f"Error en PRID: {prid}\n")
+                if not no_account:
+                    log.insert(tk.END, f"No hay resultado para el PRID: {prid}\n")
+                else:
+                    log.insert(tk.END, f"Error en PRID: {prid}\n")
 
         driver.quit()
         messagebox.showinfo("Completado", "Carga de Contactos por PRIDs finalizado.")
